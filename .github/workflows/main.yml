@@ -12,10 +12,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.9' # 버전을 3.9로 낮춰서 호환성을 잡습니다
       - name: Install Dependencies
         run: |
-          pip install yfinance pandas pandas_ta requests
+          pip install --upgrade pip
+          pip install yfinance pandas==2.0.3 pandas_ta requests
       - name: Run Sentry Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
