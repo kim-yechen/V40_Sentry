@@ -1,0 +1,24 @@
+name: V40 Daily Sentry
+on:
+  schedule:
+    - cron: '30 22 * * 1-5' # 한국 시간 평일 오전 7시 30분 (UTC 22:30)
+  workflow_dispatch: # 형님이 원할 때 수동으로 쏠 수 있는 버튼
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install Dependencies
+        run: |
+          pip install yfinance pandas pandas_ta requests
+      - name: Run Sentry Engine
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python sentry.py
