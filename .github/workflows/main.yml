@@ -1,47 +1,24 @@
-import os
-import yfinance as yf
-import pandas_ta as ta
-import requests
-import pandas as pd
-from datetime import datetime
+name: V40 Daily Sentry
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch: # 이 줄이 있어야 'Run workflow' 회색 버튼이 생깁니다!
 
-# 깃허브 금고(Secrets)에서 정보를 가져옵니다. 
-# get을 써서 열쇠가 없어도 에러로 멈추지 않게 방어막을 쳤습니다.
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
-
-def get_v40_report():
-    # 열쇠가 없는 경우를 대비한 네거티브 체크
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("🚨 에러: 깃허브 Secrets에 TELEGRAM_TOKEN 또는 CHAT_ID가 설정되지 않았습니다.")
-        return
-
-    report = f"🛡️ *[V40 데일리 센트리]*\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-    TARGETS = ['FCX', 'ERO', 'SCCO', 'IWM', 'HG=F', 'SI=F']
-    
-    for symbol in TARGETS:
-        try:
-            df = yf.download(symbol, period="60d", interval="1d", progress=False)
-            if df.empty: continue
-            df['RSI'] = ta.rsi(df['Close'], length=14)
-            macd = ta.macd(df['Close'])
-            df = pd.concat([df, macd], axis=1)
-            
-            price = df['Close'].iloc[-1]
-            rsi = df['RSI'].iloc[-1]
-            status = "⚪ 대기"
-            if 30 <= rsi <= 55: status = "🟡 눌림목"
-            elif rsi > 70: status = "⚠️ 과열"
-            
-            report += f"\n📌 *{symbol}*: ${price:.2f}\n   └ RSI: {rsi:.1f} | {status}\n"
-        except Exception as e:
-            print(f"Error analyzing {symbol}: {e}")
-            continue
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": report, "parse_mode": "Markdown"}
-    res = requests.post(url, data=payload)
-    print(f"전송 결과: {res.status_code}")
-
-if __name__ == "__main__":
-    get_v40_report()
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install Dependencies
+        run: |
+          pip install yfinance pandas pandas_ta requests
+      - name: Run Sentry Engine
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python sentry.py
