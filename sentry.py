@@ -1,17 +1,53 @@
 import os
+import yfinance as yf
+import pandas as pd
 import requests
+from datetime import datetime
 
-# [네거티브 체크] 서랍에서 열쇠를 꺼낼 때, 없으면 '없음'이라고 확실히 표시
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', 'MISSING')
-CHAT_ID = os.environ.get('CHAT_ID', 'MISSING')
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('CHAT_ID')
 
-def check_keys():
-    if TELEGRAM_TOKEN == 'MISSING' or CHAT_ID == 'MISSING':
-        print(f"🚨 [치명적 에러] 금고에서 열쇠를 못 가져왔습니다!")
-        print(f"현황 -> 토큰: {'✅' if TELEGRAM_TOKEN != 'MISSING' else '❌ 없음'}")
-        print(f"현황 -> ID: {'✅' if CHAT_ID != 'MISSING' else '❌ 없음'}")
-        exit(1) # 여기서 멈춰야 형님이 18번 줄을 다시 안 보십니다.
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=period - 1, adjust=False).mean()
+    ema_down = down.ewm(com=period - 1, adjust=False).mean()
+    rs = ema_up / ema_down
+    return 100 - (100 / (1 + rs))
+
+def get_v40_report():
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("🚨 Secrets 설정 에러")
+        return
+
+    report = f"🛡️ *[V40 데일리 센트리]*\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    TARGETS = ['FCX', 'ERO', 'SCCO', 'IWM', 'HG=F', 'SI=F']
+    
+    for symbol in TARGETS:
+        try:
+            df = yf.download(symbol, period="60d", interval="1d", progress=False)
+            if df.empty: continue
+            
+            # RSI 직접 계산 (외부 라이브러리 의존성 제거)
+            df['RSI'] = calculate_rsi(df['Close'])
+            
+            price = df['Close'].iloc[-1]
+            rsi = df['RSI'].iloc[-1]
+            
+            status = "⚪ 대기"
+            if 30 <= rsi <= 55: status = "🟡 눌림목"
+            elif rsi > 70: status = "⚠️ 과열"
+            
+            report += f"\n📌 *{symbol}*: ${price:.2f}\n   └ RSI: {rsi:.1f} | {status}\n"
+        except Exception as e:
+            print(f"❌ {symbol} 에러: {e}")
+            continue
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": report, "parse_mode": "Markdown"}
+    requests.post(url, data=payload)
+    print("🚀 보고서 전송 시도 완료")
 
 if __name__ == "__main__":
-    check_keys()
-    # 이 아래로 기존 분석 코드들이 이어짐...
+    get_v40_report()
