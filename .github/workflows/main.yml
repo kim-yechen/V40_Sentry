@@ -15,7 +15,7 @@ jobs:
           python-version: '3.10'
       - name: Install Dependencies
         run: |
-          pip install yfinance pandas requests  # pandas_ta를 삭제했습니다
+          pip install yfinance pandas requests
       - name: Run Sentry Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
