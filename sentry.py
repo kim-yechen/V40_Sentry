@@ -16,20 +16,25 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def get_v40_report():
+    # --- [데이터 수집 단계] ---
+    # 1. 고정 관리 종목 (형님이 추가로 넣고 싶은 종목들)
+    fixed_targets = ['ERO', 'FCX', 'SCCO', 'SI=F', 'HG=F', 'AAPL', 'NVDA', 'TSLA'] 
+    
+    # 2. 엑셀 파일 종목 추출
     file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
-    if not os.path.exists(file_name): return
+    excel_tickers = []
+    if os.path.exists(file_name):
+        for sheet in ['A_Shield_Report', 'B_Spear_Report', 'Full_Energy_Map']:
+            try:
+                df_sheet = pd.read_excel(file_name, sheet_name=sheet)
+                if 'Symbol' in df_sheet.columns:
+                    excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
+            except: continue
+    
+    # 3. 전체 합치기 (중복 제거)
+    targets = list(set(fixed_targets + excel_tickers))
 
-    # 1. 엑셀에서 전 종목 긁어모으기
-    all_tickers = []
-    for sheet in ['A_Shield_Report', 'B_Spear_Report', 'Full_Energy_Map']:
-        try:
-            df_sheet = pd.read_excel(file_name, sheet_name=sheet)
-            if 'Symbol' in df_sheet.columns:
-                all_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
-        except: continue
-    targets = list(set(all_tickers))
-
-    # 2. 보고서 헤더 설정
+    # --- [분석 및 보고서 작성] ---
     alerts = "⚠️ *[신분 변동 감지!]*\n"
     hits = "\n🏟️ *[오늘의 요새 (적정가 매수)]*\n"
     tracking = "\n🔍 *[신인류: 추적 및 관망]*\n"
@@ -37,7 +42,6 @@ def get_v40_report():
     found_alert = False
     found_hit = False
 
-    # 3. 전수 조사 시작
     for symbol in targets:
         try:
             symbol = str(symbol).strip().replace('.', '-')
@@ -52,13 +56,13 @@ def get_v40_report():
             is_human_today = c_today > ma200_today
             is_human_yesterday = c_yesterday > ma200_yesterday
 
-            # [신분 변동 로직]
+            # [신분 변동]
             if is_human_today != is_human_yesterday:
                 status = "👑 [바람→신인류] 승격" if is_human_today else "💀 [신인류→위험] 강등"
                 alerts += f"- {symbol}: {status}!\n"
                 found_alert = True
 
-            # [상태 분류 로직 - 형님이 물어보신 부분]
+            # [상태 분류]
             if is_human_today:
                 if 30 <= rsi <= 55:
                     hits += f"- {symbol}: RSI {rsi:.1f} (기회) ✅\n"
@@ -67,7 +71,6 @@ def get_v40_report():
                     tracking += f"- {symbol}: RSI {rsi:.1f}\n"
         except: continue
 
-    # 4. 공백 방지 (Negative Check)
     if not found_alert: alerts += "특이사항 없음\n"
     if not found_hit: hits += "현재 요새 구간 종목 없음\n"
 
