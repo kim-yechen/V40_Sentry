@@ -8,13 +8,26 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
-# ... (calculate_rsi, mfi 함수는 동일) ...
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    up = delta.clip(lower=0); down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=period - 1, adjust=False).mean()
+    ema_down = down.ewm(com=period - 1, adjust=False).mean()
+    rs = ema_up / (ema_down + 1e-10)
+    return 100 - (100 / (1 + rs))
+
+def calculate_mfi(df, period=14):
+    tp = (df['High'] + df['Low'] + df['Close']) / 3
+    rmf = tp * df['Volume']
+    up_mf = pd.Series(0.0, index=df.index); dn_mf = pd.Series(0.0, index=df.index)
+    up_mf[tp > tp.shift(1)] = rmf[tp > tp.shift(1)]
+    dn_mf[tp < tp.shift(1)] = rmf[tp < tp.shift(1)]
+    m_r = up_mf.rolling(window=period).sum() / (dn_mf.rolling(window=period).sum() + 1e-10)
+    return 100 - (100 / (1 + m_r))
 
 def get_v40_report():
-    # 1. 역할 분담 (형님의 줏대 반영)
-    # [지표용]: 절대 '오늘의 요새'에 나타나지 않음. 오직 기상 관측용.
+    # 1. 역할 분담
     observatories = ['SPY', 'XLK', 'SMH', 'XLB', 'XLE', 'COPX', 'GDX', '^IRX', 'BIL']
-    # [사냥용]: 형님이 실제로 매수 버튼을 누를 진짜 물건들.
     hunting_targets = ['SI=F', 'HG=F', 'ERO', 'FCX', 'SCCO', 'PSLV', 'CEF']
     
     file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
@@ -27,7 +40,6 @@ def get_v40_report():
                     excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
             except: continue
     
-    # 엑셀 종목 중 지표용이 섞여있다면 제거 (사냥터 순도 유지)
     actual_prey = list(set([t for t in hunting_targets + excel_tickers if t not in observatories]))
     all_symbols = list(set(actual_prey + observatories))
 
@@ -46,9 +58,14 @@ def get_v40_report():
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             
             close = df['Close']
-            market_data[symbol] = {'df': df, 'price': float(close.iloc[-1]), 'rsi': calculate_rsi(close).iloc[-1], 'mfi': calculate_mfi(df).iloc[-1], 'change': (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]}
+            market_data[symbol] = {
+                'df': df, 
+                'price': float(close.iloc[-1]), 
+                'rsi': float(calculate_rsi(close).iloc[-1]), 
+                'mfi': float(calculate_mfi(df).iloc[-1]), 
+                'change': float((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2])
+            }
 
-            # [핵심] 사냥감(actual_prey)만 요새/신분 변동 로직 적용
             if symbol in actual_prey:
                 ma200 = close.rolling(200).mean().iloc[-1]
                 prev_ma = close.rolling(200).mean().iloc[-2]
@@ -58,9 +75,9 @@ def get_v40_report():
                     if 30 <= market_data[symbol]['rsi'] <= 55:
                         hits += f"- {symbol}: RSI {market_data[symbol]['rsi']:.1f} ✅\n"; found_hit = True
                     else: tracking += f"- {symbol}: RSI {market_data[symbol]['rsi']:.1f}\n"
-        except: continue
+        except Exception as e: continue
 
-    # 3. [이면 분석] RS Matrix & 유동성 진공 (지표용 활용)
+    # 3. [이면 분석] 유동성 전이 지수
     vacuum_msg = "\n🌀 *[유동성 진공/전이 지수]*\n"
     if 'SPY' in market_data:
         spy_c = market_data['SPY']['df']['Close']
@@ -71,15 +88,33 @@ def get_v40_report():
         
         tech_rs = (rs_scores.get('XLK', 0) + rs_scores.get('SMH', 0)) / 2
         real_rs = (rs_scores.get('XLB', 0) + rs_scores.get('COPX', 0) + rs_scores.get('GDX', 0)) / 3
-        vacuum_msg += f"└ {'🚀 전이 포착' if tech_rs < 0 and real_rs > 0 else '⚠️ 블랙홀' if tech_rs > 0 and real_rs < 0 else '🚦 혼조'}: (T:{tech_rs:.1f}% / R:{real_rs:.1f}%)\n"
+        status = "🚀 전이 포착" if tech_rs < 0 and real_rs > 0 else "⚠️ 블랙홀" if tech_rs > 0 and real_rs < 0 else "🚦 혼조"
+        vacuum_msg += f"└ {status}: (T:{tech_rs:.1f}% / R:{real_rs:.1f}%)\n"
 
-    # 4. [오라클] 최종 판정
+    # 4. [오라클] 최종 판정 (생략 없이 전체 복구)
     oracle_section = "\n🔮 *[V40 오라클]*\n"
-    # ... (은/금리 로직 수행) ...
+    silver = market_data.get('SI=F') or market_data.get('SLV')
+    rate_change = market_data.get('^IRX', {}).get('change')
+    if rate_change is None and 'BIL' in market_data: rate_change = market_data['BIL']['change'] * -1
 
-    # 5. 최종 메시지 조립
+    if silver and rate_change is not None:
+        s_rsi = silver['rsi'] if 'SI=F' in market_data else silver['rsi'] * 1.02
+        if s_rsi > 60 and silver['mfi'] > 60:
+            status = "⚡ *붕괴:* [악성 인플레]" if rate_change > 0 else "🌀 *유동성 중첩:* [실물 강세]"
+            oracle_section += f"{status}\n└ 근거: {('선물' if 'SI=F' in market_data else 'ETF')} 기반\n"
+        else: oracle_section += "✅ 특이 붕괴 없음\n"
+    else: oracle_section += "❓ 데이터 부족으로 분석 불가\n"
+
+    # 5. 메시지 최종 조립 및 발송
     if not found_alert: alerts += "특이사항 없음\n"
     if not found_hit: hits += "현재 요새 구간 종목 없음\n"
     
     final_msg = f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n" + alerts + hits + tracking + vacuum_msg + oracle_section
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
+    
+    # 텔레그램 발송 시도
+    res = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
+    if res.status_code != 200:
+        print(f"Telegram Error: {res.text}")
+
+if __name__ == "__main__":
+    get_v40_report()
