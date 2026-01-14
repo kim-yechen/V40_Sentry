@@ -25,107 +25,86 @@ def calculate_mfi(df, period=14):
     m_r = up_mf.rolling(window=period).sum() / (dn_mf.rolling(window=period).sum() + 1e-10)
     return 100 - (100 / (1 + m_r))
 
-def calculate_atr(df, period=14):
-    tr = pd.concat([df['High']-df['Low'], (df['High']-df['Close'].shift(1)).abs(), (df['Low']-df['Close'].shift(1)).abs()], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean()
-
 def get_v40_report():
-    # SLV와 BIL을 감시 대상에 공식 추가 (대체 경로용)
-    fixed_targets = ['ERO', 'FCX', 'SCCO', 'SI=F', 'HG=F', 'AAPL', 'NVDA', 'TSLA', '^IRX', 'SLV', 'BIL'] 
-    file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
-    
-    excel_tickers = []
-    if os.path.exists(file_name):
-        for sheet in ['A_Shield_Report', 'B_Spear_Report', 'Full_Energy_Map']:
-            try:
-                df_sheet = pd.read_excel(file_name, sheet_name=sheet)
-                if 'Symbol' in df_sheet.columns:
-                    excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
-            except: continue
-    targets = list(set(fixed_targets + excel_tickers))
+    # SPY를 기준으로 상대 강도(RS)를 계산하기 위해 리스트에 추가
+    sectors = ['XLK', 'XLE', 'XLB', 'COPX', 'GDX', 'SMH', 'SPY']
+    essentials = ['SI=F', 'HG=F', '^IRX', 'SLV', 'BIL', 'ERO', 'FCX', 'SCCO']
+    targets = list(set(sectors + essentials))
 
-    alerts = "⚠️ *[신분 변동 감지!]*\n"; hits = "\n🏟 *[오늘의 요새 (적정가 매수)]*\n"
-    tracking = "\n🔍 *[신인류: 추적 및 관망]*\n"
-    oracle_section = "\n🔮 *[V40 오라클: 3중 스위치 분석]*\n"
-    
-    found_alert = False; found_hit = False
     market_data = {}
+    rs_scores = {}
 
+    # 1. 전 종목 데이터 수집 및 기본 지표 계산
     for symbol in targets:
         try:
-            time.sleep(0.5)
-            df = yf.download(symbol, period="250d", interval="1d", progress=False)
-            if df is None or len(df) < 200: continue
+            time.sleep(0.7)
+            df = yf.download(symbol, period="300d", interval="1d", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 200: continue
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             
-            c_today = df['Close'].iloc[-1]; c_yesterday = df['Close'].iloc[-2]
-            rsi = calculate_rsi(df['Close']).iloc[-1]
-            mfi = calculate_mfi(df).iloc[-1]
-            atr = calculate_atr(df).iloc[-1]
-            
+            close = df['Close']
             market_data[symbol] = {
-                'price': c_today, 'rsi': rsi, 'mfi': mfi, 
-                'atr_p': (atr / c_today) * 100,
-                'change': (c_today - c_yesterday) / c_yesterday
+                'df': df,
+                'price': float(close.iloc[-1]),
+                'rsi': calculate_rsi(close).iloc[-1],
+                'mfi': calculate_mfi(df).iloc[-1],
+                'change': (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]
             }
-
-            # 기존 신분/요새 로직
-            ma200 = df['Close'].rolling(200).mean().iloc[-1]
-            if (c_today > ma200) != (c_yesterday > df['Close'].rolling(200).mean().iloc[-2]):
-                alerts += f"- {symbol}: {'👑 [승격]' if c_today > ma200 else '💀 [강등]'}!\n"; found_alert = True
-            if c_today > ma200:
-                if 30 <= rsi <= 55: hits += f"- {symbol}: RSI {rsi:.1f} ✅\n"; found_hit = True
-                else: tracking += f"- {symbol}: RSI {rsi:.1f}\n"
         except: continue
 
-    # --- [WFC 오라클 3.8: 대체 경로 및 보정 로직] ---
-    # 1. 은(Silver) 데이터 확정
-    silver_final = None
-    if 'SI=F' in market_data:
-        silver_final = market_data['SI=F']
-        silver_final['source'] = "선물(SI=F)"
-    elif 'SLV' in market_data:
-        # SI=F 누락 시 형님의 1.02 보정값 적용
-        silver_final = market_data['SLV'].copy()
-        silver_final['rsi'] *= 1.02 # 보정값 적용
-        silver_final['source'] = "ETF(SLV) * 1.02 보정"
-        # Negative Check: 5% 괴리 셧다운 (이미 보정값이 2%이므로 극단적 상황 감지)
-        if silver_final['rsi'] > 95: # RSI가 보정으로 인해 비정상적으로 높을 때 등
-             silver_final['panic'] = True
+    # 2. [이면 분석] RS Matrix (상대 강도) 계산
+    if 'SPY' in market_data:
+        spy_close = market_data['SPY']['df']['Close']
+        for sec in ['XLK', 'XLE', 'XLB', 'COPX', 'GDX', 'SMH']:
+            if sec in market_data:
+                sec_close = market_data[sec]['df']['Close']
+                # 시장 대비 상대 강도 비율 (Sector / SPY)
+                rs_ratio = sec_close / spy_close
+                # RS 기울기 (최근 5일간의 변화율)
+                rs_slope = (rs_ratio.iloc[-1] - rs_ratio.iloc[-5]) / rs_ratio.iloc[-5] * 100
+                rs_scores[sec] = rs_slope
 
-    # 2. 금리(Yield) 데이터 확정
-    rate_change = 0
-    rate_source = "데이터 없음"
-    if '^IRX' in market_data:
-        rate_change = market_data['^IRX']['change']
-        rate_source = "국채(^IRX)"
-    elif 'BIL' in market_data:
-        # BIL 가격 하락 = 금리 상승 (역산 -1)
-        rate_change = market_data['BIL']['change'] * -1
-        rate_source = "초단기채(BIL) 역산"
-
-    # 3. 최종 오라클 판정
-    if silver_final and rate_source != "데이터 없음":
-        if silver_final.get('panic'):
-            oracle_section += "🚨 *시스템 셧다운:* [뱅크런 전조] 관측\n"
-            oracle_section += "└ 🔍 근거: 실물-종이 자산 괴리율 임계점 돌파\n"
+    # 3. [유동성 진공 지수] 기술주(SMH/XLK) vs 실물(COPX/GDX/XLB)
+    vacuum_msg = ""
+    if rs_scores:
+        tech_rs = (rs_scores.get('XLK', 0) + rs_scores.get('SMH', 0)) / 2
+        real_rs = (rs_scores.get('XLB', 0) + rs_scores.get('COPX', 0) + rs_scores.get('GDX', 0)) / 3
+        
+        vacuum_msg = "\n🌀 *[유동성 진공/전이 지수]*\n"
+        if tech_rs < 0 and real_rs > 0:
+            vacuum_msg += f"└ 🚀 **[전이 포착]:** 기술주(-{abs(tech_rs):.1f}%) → 실물(+{real_rs:.1f}%)로 돈이 탈출 중!\n"
+        elif tech_rs > 0 and real_rs < 0:
+            vacuum_msg += f"└ ⚠️ **[블랙홀]:** 실물이 죽고 기술주(+{tech_rs:.1f}%)가 유동성을 흡수 중입니다.\n"
         else:
-            if silver_final['rsi'] > 60 and silver_final['mfi'] > 60:
-                status = "⚡ *붕괴:* [악성 인플레이션]" if rate_change > 0 else "🌀 *유동성 중첩:* [실체 있는 상승]"
-                oracle_section += f"{status}\n"
-                oracle_section += f"└ 근거: {silver_final['source']} 기반 분석\n"
-                oracle_section += f"└ 지표: RSI {silver_final['rsi']:.1f} / MFI {silver_final['mfi']:.1f}\n"
-            elif silver_final['rsi'] > 60 and silver_final['mfi'] <= 50:
-                oracle_section += "⚠️ *가짜 붕괴 경보:* [허수 과열]\n"
-                oracle_section += f"└ 근거: {silver_final['source']} 과열 대비 자금유입 저조\n"
-            else:
-                oracle_section += "✅ 특이 붕괴 없음 (인과율 안정적)\n"
-    else:
-        oracle_section += "❓ *분석 불가:* SI/SLV 및 IRX/BIL 전체 데이터 누락\n"
+            vacuum_msg += f"└ 🚦 **[혼조]:** 돈의 방향성이 아직 모호합니다. (Tech: {tech_rs:.1f}% / Real: {real_rs:.1f}%)\n"
 
-    # 최종 보고서 발송
-    if not found_alert: alerts += "특이사항 없음\n"
-    if not found_hit: hits += "현재 요새 구간 종목 없음\n"
-    final_msg = f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n" + alerts + hits + tracking + oracle_section
+    # --- 오라클 섹션 구성 ---
+    oracle_section = "\n🔮 *[V40 오라클: 3중 스위치 분석]*\n"
+    
+    # 은/금리 로직 (형님의 보정값 유지)
+    silver = market_data.get('SI=F') or market_data.get('SLV')
+    if silver and 'SI=F' not in market_data:
+        silver['rsi'] *= 1.02
+        silver['source'] = "ETF(SLV)*1.02"
+    elif silver:
+        silver['source'] = "선물(SI=F)"
+
+    rate_change = market_data.get('^IRX', {}).get('change')
+    if rate_change is None and 'BIL' in market_data:
+        rate_change = market_data['BIL']['change'] * -1
+
+    if silver and rate_change is not None:
+        if silver['rsi'] > 60 and silver['mfi'] > 60:
+            status = "⚡ *붕괴:* [악성 인플레이션]" if rate_change > 0 else "🌀 *유동성 중첩:* [실물 강세]"
+            oracle_section += f"{status}\n└ 근거: {silver['source']} 기반\n"
+        else:
+            oracle_section += "✅ 특이 붕괴 없음 (인과율 안정적)\n"
+
+    # 최종 보고서 조립
+    final_msg = f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
+    final_msg += vacuum_msg + oracle_section
+    
+    # 텔레그램 발송
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
