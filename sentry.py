@@ -26,7 +26,7 @@ def calculate_mfi(df, period=14):
     
     pos_sum = up_mf.rolling(window=period).sum()
     neg_sum = dn_mf.rolling(window=period).sum()
-    m_r = pos_sum / (neg_sum + 1e-10) # Negative Check: 0 나누기 방지
+    m_r = pos_sum / (neg_sum + 1e-10)
     return 100 - (100 / (1 + m_r))
 
 def calculate_atr(df, period=14):
@@ -59,16 +59,13 @@ def get_v40_report():
 
     for symbol in targets:
         try:
-            # 깃허브 무료 환경을 위한 타임 슬립 (야후 차단 방지)
             time.sleep(0.5) 
             df = yf.download(symbol, period="250d", interval="1d", progress=False)
             
-            # [Negative Check] 데이터가 너무 적거나 누락된 경우 스킵
             if df is None or len(df) < 200:
                 print(f"Data missing for {symbol}")
                 continue
             
-            # 지표 계산 최적화
             close = df['Close']
             ma200 = close.rolling(200).mean()
             rsi = calculate_rsi(close).iloc[-1]
@@ -82,13 +79,13 @@ def get_v40_report():
                 'change': (c_today - c_yesterday) / c_yesterday
             }
 
-            # 신분 변동 로직
             is_human_today = c_today > ma200.iloc[-1]
             is_human_yesterday = c_yesterday > ma200.iloc[-2]
 
             if is_human_today != is_human_yesterday:
                 status = "👑 [승격]" if is_human_today else "💀 [강등]"
-                alerts += f f"- {symbol}: {status}!\n"; found_alert = True
+                # 수정된 부분: f f -> f 한 개로 수정
+                alerts += f"- {symbol}: {status}!\n"; found_alert = True
             
             if is_human_today:
                 if 30 <= rsi <= 55:
@@ -99,7 +96,6 @@ def get_v40_report():
             print(f"Error analyzing {symbol}: {e}")
             continue
 
-    # [오라클 분석] - 데이터 존재 여부 확인 후 실행
     if 'SI=F' in market_data and '^IRX' in market_data:
         rate_trend = market_data['^IRX']['change']
         silver = market_data['SI=F']
@@ -119,7 +115,6 @@ def get_v40_report():
     else:
         oracle_section += "❓ *분석 불가:* 핵심 지표(SI/IRX) 데이터 누락\n"
 
-    # 최종 발송
     if not found_alert: alerts += "특이사항 없음\n"
     if not found_hit: hits += "현재 요새 구간 종목 없음\n"
     final_msg = f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n" + alerts + hits + tracking + oracle_section
