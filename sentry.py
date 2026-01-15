@@ -30,6 +30,9 @@ def get_v40_report():
     observatories = ['SPY', 'XLK', 'SMH', 'XLB', 'XLE', 'COPX', 'GDX', '^IRX', 'BIL']
     hunting_targets = ['SI=F', 'HG=F', 'ERO', 'FCX', 'SCCO', 'PSLV', 'CEF']
     
+    # [추가] 형님의 병목 섹터 (가중치 대상)
+    core_sectors = ['FCX', 'SCCO', 'PSLV', 'PPL', 'DTE', 'ASTS', 'SI=F', 'COPX', 'ERO']
+    
     file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
     excel_tickers = []
     if os.path.exists(file_name):
@@ -46,7 +49,7 @@ def get_v40_report():
     market_data = {}
     found_alert = False; found_hit = False
 
-    # 2. 전수 조사 실행 (수정 포인트: market_data에 모든 지표 엄격히 저장)
+    # 2. 전수 조사 실행
     for symbol in all_symbols:
         try:
             time.sleep(0.4)
@@ -65,20 +68,28 @@ def get_v40_report():
             curr_mfi = float(calculate_mfi(df).iloc[-1])
             change = (curr_price - prev_price) / prev_price
 
-            # [데이터 저장 - 기상도 연산용]
+            # [V-Energy 연산: 질량(MFI)과 가속도(RSI)의 결합]
+            v_energy = (curr_mfi * 0.6) + (curr_rsi * 0.4)
+
             market_data[symbol] = {'df': df, 'price': curr_price, 'rsi': curr_rsi, 'mfi': curr_mfi, 'change': change}
 
-            # [Negative Check] 이상 급변동 필터
             if abs(change) > 0.3: 
                 alerts += f"- {symbol}: ⚠️ 이상 급변동 감지 (검증 필요)\n"
                 found_alert = True
                 continue
 
             if symbol in actual_prey:
-                # [신분 변동 판정 - 형님 로직 그대로]
+                # [수정: 신분 변동 판정 강화]
                 if (curr_price > ma200) and (prev_price <= ma_series.iloc[-2]):
-                    status = "👑 [진성 승격]" if ma200_slope > 0 else "✨ [기술적 승격]"
-                    alerts += f"- {symbol}: {status}!\n"
+                    # 병목 섹터 프리미엄 및 에너지 필터 적용
+                    prefix = "🚀 [핵심병목] " if symbol in core_sectors else ""
+                    
+                    if ma200_slope > 0 and v_energy >= 70:
+                        status = "👑 [진성 승격]"
+                    else:
+                        status = "✨ [기술적 승격]"
+                    
+                    alerts += f"- {prefix}{symbol}: {status}! (E:{v_energy:.1f})\n"
                     found_alert = True
                 elif (curr_price < ma200) and (prev_price >= ma_series.iloc[-2]):
                     alerts += f"- {symbol}: 💀 [강등]\n"
@@ -95,7 +106,7 @@ def get_v40_report():
                         tracking += f"- {symbol}: RSI {curr_rsi:.1f}\n"
         except: continue
 
-    # 3. [복구] 이면 분석 (기상도용)
+    # 3. [유지] 이면 분석 (기상도용)
     vacuum_msg = "└ 🚦 데이터 부족으로 연산 불가\n"
     if 'SPY' in market_data:
         spy_c = market_data['SPY']['df']['Close']
@@ -111,14 +122,14 @@ def get_v40_report():
             v_status = "🚀 전이 포착" if t_rs < 0 and r_rs > 0 else "🚦 혼조"
             vacuum_msg = f"└ {v_status}: (T:{t_rs:.1f}% / R:{r_rs:.1f}%)\n"
 
-    # 4. [복구] 오라클 (기상도용)
+    # 4. [유지] 오라클 (기상도용)
     silver = market_data.get('SI=F') or market_data.get('PSLV')
     rate_change = market_data.get('^IRX', {}).get('change', 0)
     oracle_res = "✅ 특이 붕괴 없음\n"
     if silver and silver['rsi'] > 60 and silver['mfi'] > 60:
         oracle_res = "🌀 유동성 중첩: 실물 강세\n" if rate_change <= 0 else "⚡ 붕괴: 악성 인플레\n"
 
-    # 5. 리포트 조립 (형님이 원하신 전체 나열 방식)
+    # 5. 리포트 조립
     report_1 = (
         f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n"
         f"🌀 *[유동성 진공/전이 지수]*\n{vacuum_msg}\n"
@@ -132,7 +143,6 @@ def get_v40_report():
         f"🔍 *[신인류: 추적 및 관망]*\n{tracking}"
     )
 
-    # 발송
     for msg in [report_1, report_2]:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
