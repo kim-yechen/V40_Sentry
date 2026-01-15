@@ -75,7 +75,7 @@ def get_v40_report():
                     if 30 <= market_data[symbol]['rsi'] <= 55:
                         hits += f"- {symbol}: RSI {market_data[symbol]['rsi']:.1f} ✅\n"; found_hit = True
                     else: tracking += f"- {symbol}: RSI {market_data[symbol]['rsi']:.1f}\n"
-        except Exception as e: continue
+        except Exception: continue
 
     # 3. [이면 분석] 유동성 전이 지수
     vacuum_msg = "\n🌀 *[유동성 진공/전이 지수]*\n"
@@ -91,30 +91,42 @@ def get_v40_report():
         status = "🚀 전이 포착" if tech_rs < 0 and real_rs > 0 else "⚠️ 블랙홀" if tech_rs > 0 and real_rs < 0 else "🚦 혼조"
         vacuum_msg += f"└ {status}: (T:{tech_rs:.1f}% / R:{real_rs:.1f}%)\n"
 
-    # 4. [오라클] 최종 판정 (생략 없이 전체 복구)
+    # 4. [오라클] 최종 판정
     oracle_section = "\n🔮 *[V40 오라클]*\n"
     silver = market_data.get('SI=F') or market_data.get('SLV')
-    rate_change = market_data.get('^IRX', {}).get('change')
-    if rate_change is None and 'BIL' in market_data: rate_change = market_data['BIL']['change'] * -1
+    rate_change_val = market_data.get('^IRX', {}).get('change')
+    if rate_change_val is None and 'BIL' in market_data: rate_change_val = market_data['BIL']['change'] * -1
 
-    if silver and rate_change is not None:
-        s_rsi = silver['rsi'] if 'SI=F' in market_data else silver['rsi'] * 1.02
+    if silver and rate_change_val is not None:
+        s_rsi = silver['rsi']
         if s_rsi > 60 and silver['mfi'] > 60:
-            status = "⚡ *붕괴:* [악성 인플레]" if rate_change > 0 else "🌀 *유동성 중첩:* [실물 강세]"
-            oracle_section += f"{status}\n└ 근거: {('선물' if 'SI=F' in market_data else 'ETF')} 기반\n"
+            status = "⚡ *붕괴:* [악성 인플레]" if rate_change_val > 0 else "🌀 *유동성 중첩:* [실물 강세]"
+            oracle_section += f"{status}\n└ 근거: 에너지 임계점 돌파\n"
         else: oracle_section += "✅ 특이 붕괴 없음\n"
     else: oracle_section += "❓ 데이터 부족으로 분석 불가\n"
 
-    # 5. 메시지 최종 조립 및 발송
-    if not found_alert: alerts += "특이사항 없음\n"
-    if not found_hit: hits += "현재 요새 구간 종목 없음\n"
+    # 5. 메시지 최종 조립 (함수 내부로 정렬 완료!)
+    if not found_alert:
+        alerts += "특이사항 없음\n"
+    if not found_hit:
+        hits += "현재 요새 구간 종목 없음\n"
     
-    final_msg = f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n" + alerts + hits + tracking + vacuum_msg + oracle_section
+    report_parts = [
+        f"🛡 *[V40 전략 리포트]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n",
+        alerts, hits, tracking, vacuum_msg, oracle_section
+    ]
+    final_msg = "\n".join(report_parts)
     
-    # 텔레그램 발송 시도
-    res = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
-    if res.status_code != 200:
-        print(f"Telegram Error: {res.text}")
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown", "disable_web_page_preview": True}
+        res = requests.post(url, data=payload, timeout=10)
+        if res.status_code != 200:
+            payload["parse_mode"] = ""
+            requests.post(url, data=payload)
+    except Exception as e:
+        print(f"발송 실패: {e}")
 
+# 마지막 실행 구문 (반드시 포함되어야 함)
 if __name__ == "__main__":
     get_v40_report()
