@@ -105,41 +105,36 @@ def get_v40_report():
         else: oracle_section += "✅ 특이 붕괴 없음\n"
     else: oracle_section += "❓ 데이터 부족으로 분석 불가\n"
 
-   # --- [1회차 발송: 시장 기상도 및 유동성 보고] ---
+    # 5. 메시지 분할 조립 (함수 내부)
     if not found_alert:
         alerts += "특이사항 없음\n"
-        
-    report_1 = [
-        f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n",
-        vacuum_msg,     # 유동성 진공/전이
-        oracle_section, # 오라클 붕괴 판정
-        alerts          # 신분 변동
-    ]
-    
-    # --- [2회차 발송: 실전 사냥 및 요새 보고] ---
     if not found_hit:
         hits += "현재 요새 구간 종목 없음\n"
         
+    report_1 = [
+        f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n",
+        vacuum_msg, oracle_section, alerts
+    ]
+    
     report_2 = [
         f"🏟 *[V40 2회차: 실전 사냥 보고]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n",
-        hits,           # 오늘의 요새 (적정가)
-        tracking        # 신인류 (추적/관망)
-        # 여기에 추후 '실물 함량 체크' 로직 추가 가능
+        hits, tracking
     ]
 
-    # --- 최종 발송 로직 (두 번 쏜다!) ---
+    # 발송 로직 (함수 내부)
     for i, report_content in enumerate([report_1, report_2], 1):
         final_msg = "\n".join(report_content)
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             payload = {"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown", "disable_web_page_preview": True}
-            res = requests.post(url, data=payload, timeout=10)
-            
-            if res.status_code != 200: # 에러 시 마크다운 없이 재시도
+            res = requests.post(url, data=payload, timeout=15)
+            if res.status_code != 200:
                 payload["parse_mode"] = ""
                 requests.post(url, data=payload)
-            
-            print(f"{i}회차 보고 발송 완료")
-            time.sleep(1) # 발송 간격 1초 유지 (안전)
+            time.sleep(1.5)
         except Exception as e:
             print(f"{i}회차 발송 실패: {e}")
+
+# [핵심] 여기서 함수를 실행하라고 명령해야 텔레그램이 옵니다!
+if __name__ == "__main__":
+    get_v40_report()
