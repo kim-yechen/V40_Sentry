@@ -26,7 +26,7 @@ def calculate_mfi(df, period=14):
     return 100 - (100 / (1 + m_r))
 
 def get_v40_report():
-    # 1. 전수 조사 대상 (엑셀 뒤지기)
+    # 1. 대상 확보 (기존 로직 유지)
     observatories = ['SPY', 'XLK', 'SMH', 'XLB', 'XLE', 'COPX', 'GDX', '^IRX', 'BIL']
     hunting_targets = ['SI=F', 'HG=F', 'ERO', 'FCX', 'SCCO', 'PSLV', 'CEF']
     
@@ -46,10 +46,10 @@ def get_v40_report():
     market_data = {}
     found_alert = False; found_hit = False
 
-    # 2. 전수 조사 실행 (추세/기울기/안착 로직 탑재)
+    # 2. 전수 조사 실행 (수정 포인트: market_data에 모든 지표 엄격히 저장)
     for symbol in all_symbols:
         try:
-            time.sleep(0.5)
+            time.sleep(0.4)
             df = yf.download(symbol, period="300d", interval="1d", progress=False, auto_adjust=True)
             if df.empty or len(df) < 200: continue
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
@@ -57,7 +57,7 @@ def get_v40_report():
             close = df['Close']
             ma_series = close.rolling(200).mean()
             ma200 = ma_series.iloc[-1]
-            ma200_slope = ma200 - ma_series.iloc[-5] # 5일 기울기
+            ma200_slope = ma200 - ma_series.iloc[-5]
             
             curr_price = float(close.iloc[-1])
             prev_price = float(close.iloc[-2])
@@ -65,49 +65,77 @@ def get_v40_report():
             curr_mfi = float(calculate_mfi(df).iloc[-1])
             change = (curr_price - prev_price) / prev_price
 
-            # [Negative Check] 데이터 상식 검증
+            # [데이터 저장 - 기상도 연산용]
+            market_data[symbol] = {'df': df, 'price': curr_price, 'rsi': curr_rsi, 'mfi': curr_mfi, 'change': change}
+
+            # [Negative Check] 이상 급변동 필터
             if abs(change) > 0.3: 
                 alerts += f"- {symbol}: ⚠️ 이상 급변동 감지 (검증 필요)\n"
+                found_alert = True
                 continue
 
             if symbol in actual_prey:
-                # 3일 안착 여부 확인
-                stay_confirm = (close.tail(3) > ma_series.tail(3)).all()
-                
-                # [개선된 신분 변동] 단순 돌파가 아닌 '추세 확정'
+                # [신분 변동 판정 - 형님 로직 그대로]
                 if (curr_price > ma200) and (prev_price <= ma_series.iloc[-2]):
-                    if ma200_slope > 0:
-                        alerts += f"- {symbol}: 👑 [진성 승격] (기울기 우상향 컨펌)\n"
-                    else:
-                        alerts += f"- {symbol}: ✨ [기술적 승격] (단기 반등 주의)\n"
+                    status = "👑 [진성 승격]" if ma200_slope > 0 else "✨ [기술적 승격]"
+                    alerts += f"- {symbol}: {status}!\n"
                     found_alert = True
                 elif (curr_price < ma200) and (prev_price >= ma_series.iloc[-2]):
                     alerts += f"- {symbol}: 💀 [강등]\n"
                     found_alert = True
                 
-                # [개선된 사냥 구간] 요새 + 대세 상승 초입
+                # [사냥 구간 판정]
                 if curr_price > ma200:
-                    disparity = (curr_price - ma200) / ma200 # 괴리율
+                    disparity = (curr_price - ma200) / ma200
                     if 30 <= curr_rsi <= 55:
-                        hits += f"- {symbol}: RSI {curr_rsi:.1f} ✅ [요새 구간]\n"; found_hit = True
-                    elif 55 < curr_rsi <= 65 and disparity <= 0.05: # 대세 상승 초입 필터
-                        hits += f"- {symbol}: RSI {curr_rsi:.1f} 🔥 [추세 추종 가능]\n"; found_hit = True
+                        hits += f"- {symbol}: RSI {curr_rsi:.1f} ✅ [요새]\n"; found_hit = True
+                    elif 55 < curr_rsi <= 65 and disparity <= 0.05:
+                        hits += f"- {symbol}: RSI {curr_rsi:.1f} 🔥 [초입]\n"; found_hit = True
                     else:
                         tracking += f"- {symbol}: RSI {curr_rsi:.1f}\n"
-
-            # 기상도용 데이터 저장
-            market_data[symbol] = {'df': df, 'price': curr_price, 'rsi': curr_rsi, 'mfi': curr_mfi, 'change': change}
         except: continue
 
-    # (3, 4번 기상도/오라클 로직 생략 - 기존과 동일하게 유지하되 메시지만 2개로 분리)
-    # ... (생략된 부분: vacuum_msg, oracle_res 조립) ...
+    # 3. [복구] 이면 분석 (기상도용)
+    vacuum_msg = "└ 🚦 데이터 부족으로 연산 불가\n"
+    if 'SPY' in market_data:
+        spy_c = market_data['SPY']['df']['Close']
+        rs_scores = {}
+        for sec in ['XLK', 'SMH', 'XLB', 'COPX', 'GDX']:
+            if sec in market_data:
+                ratio = market_data[sec]['df']['Close'] / spy_c
+                rs_scores[sec] = (ratio.iloc[-1] - ratio.iloc[-5]) / ratio.iloc[-5] * 100
+        
+        if rs_scores:
+            t_rs = (rs_scores.get('XLK', 0) + rs_scores.get('SMH', 0)) / 2
+            r_rs = (rs_scores.get('XLB', 0) + rs_scores.get('COPX', 0) + rs_scores.get('GDX', 0)) / 3
+            v_status = "🚀 전이 포착" if t_rs < 0 and r_rs > 0 else "🚦 혼조"
+            vacuum_msg = f"└ {v_status}: (T:{t_rs:.1f}% / R:{r_rs:.1f}%)\n"
 
-    # 메시지 발송
-    report_1 = f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n⚠️ *[신분 변동 감지!]*\n{alerts if found_alert else '특이사항 없음'}"
-    report_2 = f"🏟 *[V40 2회차: 실전 사냥 보고]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n🏟 *[오늘의 요새]*\n{hits if found_hit else '구간 종목 없음'}\n\n🔍 *[추적/관망]*\n{tracking}"
+    # 4. [복구] 오라클 (기상도용)
+    silver = market_data.get('SI=F') or market_data.get('PSLV')
+    rate_change = market_data.get('^IRX', {}).get('change', 0)
+    oracle_res = "✅ 특이 붕괴 없음\n"
+    if silver and silver['rsi'] > 60 and silver['mfi'] > 60:
+        oracle_res = "🌀 유동성 중첩: 실물 강세\n" if rate_change <= 0 else "⚡ 붕괴: 악성 인플레\n"
 
+    # 5. 리포트 조립 (형님이 원하신 전체 나열 방식)
+    report_1 = (
+        f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n"
+        f"🌀 *[유동성 진공/전이 지수]*\n{vacuum_msg}\n"
+        f"🔮 *[V40 오라클]*\n{oracle_res}\n"
+        f"⚠️ *[신분 변동 감지!]*\n{alerts if found_alert else '특이사항 없음'}"
+    )
+
+    report_2 = (
+        f"🏟 *[V40 2회차: 실전 사냥 보고]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n"
+        f"🏟 *[오늘의 요새 & 초입]*\n{hits if found_hit else '구간 종목 없음'}\n"
+        f"🔍 *[신인류: 추적 및 관망]*\n{tracking}"
+    )
+
+    # 발송
     for msg in [report_1, report_2]:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
         time.sleep(2)
 
 if __name__ == "__main__":
