@@ -8,24 +8,34 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
+# --- [초기값 선언: NameError 방지용 Shortcut 방지] ---
+vacuum_msg = "└ 🚦 유동성 데이터 연산 실패\n"
+oracle_res = "✅ 특이 붕괴 없음\n"
+
 def calculate_rsi(series, period=14):
-    delta = series.diff()
-    up = delta.clip(lower=0); down = -1 * delta.clip(upper=0)
-    ema_up = up.ewm(com=period - 1, adjust=False).mean()
-    ema_down = down.ewm(com=period - 1, adjust=False).mean()
-    rs = ema_up / (ema_down + 1e-10)
-    return 100 - (100 / (1 + rs))
+    try:
+        delta = series.diff()
+        up = delta.clip(lower=0); down = -1 * delta.clip(upper=0)
+        ema_up = up.ewm(com=period - 1, adjust=False).mean()
+        ema_down = down.ewm(com=period - 1, adjust=False).mean()
+        rs = ema_up / (ema_down + 1e-10)
+        return 100 - (100 / (1 + rs))
+    except: return pd.Series([50.0] * len(series)) # 에러 시 중립값
 
 def calculate_mfi(df, period=14):
-    tp = (df['High'] + df['Low'] + df['Close']) / 3
-    rmf = tp * df['Volume']
-    up_mf = pd.Series(0.0, index=df.index); dn_mf = pd.Series(0.0, index=df.index)
-    up_mf[tp > tp.shift(1)] = rmf[tp > tp.shift(1)]
-    dn_mf[tp < tp.shift(1)] = rmf[tp < tp.shift(1)]
-    m_r = up_mf.rolling(window=period).sum() / (dn_mf.rolling(window=period).sum() + 1e-10)
-    return 100 - (100 / (1 + m_r))
+    try:
+        tp = (df['High'] + df['Low'] + df['Close']) / 3
+        rmf = tp * df['Volume']
+        up_mf = pd.Series(0.0, index=df.index); dn_mf = pd.Series(0.0, index=df.index)
+        up_mf[tp > tp.shift(1)] = rmf[tp > tp.shift(1)]
+        dn_mf[tp < tp.shift(1)] = rmf[tp < tp.shift(1)]
+        m_r = up_mf.rolling(window=period).sum() / (dn_mf.rolling(window=period).sum() + 1e-10)
+        return 100 - (100 / (1 + m_r))
+    except: return pd.Series([50.0] * len(df)) # 에러 시 중립값
 
 def get_v40_report():
+    global vacuum_msg, oracle_res # 전역 변수 참조 명시
+    
     observatories = ['SPY', 'XLK', 'SMH', 'XLB', 'XLE', 'COPX', 'GDX', '^IRX', 'BIL']
     hunting_targets = ['SI=F', 'HG=F', 'ERO', 'FCX', 'SCCO', 'PSLV', 'CEF']
     core_sectors = ['FCX', 'SCCO', 'PSLV', 'PPL', 'DTE', 'ASTS', 'SI=F', 'COPX']
@@ -33,24 +43,29 @@ def get_v40_report():
     file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
     excel_tickers = []
     if os.path.exists(file_name):
-        xls = pd.ExcelFile(file_name)
-        for sheet in xls.sheet_names:
-            df_sheet = pd.read_excel(file_name, sheet_name=sheet)
-            if 'Symbol' in df_sheet.columns:
-                excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
+        try:
+            xls = pd.ExcelFile(file_name)
+            for sheet in xls.sheet_names:
+                df_sheet = pd.read_excel(file_name, sheet_name=sheet)
+                if 'Symbol' in df_sheet.columns:
+                    excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
+        except Exception as e:
+            print(f"Excel Load Error: {e}")
     
     actual_prey = list(set([t for t in hunting_targets + excel_tickers if str(t) not in observatories]))
     all_symbols = list(set(actual_prey + observatories))
 
-    # 분류용 리스트
-    kings = [] # 👑 진성 승격 (에너지 70+ & 기울기+)
-    downgrades = [] # 💀 강등
-    hits = ""; tracking = ""; market_data = {}
+    kings = []
+    downgrades = []
+    market_data = {}
 
+    # 2. 전수 조사 실행
     for symbol in all_symbols:
         try:
-            time.sleep(0.4)
-            df = yf.download(symbol, period="300d", interval="1d", progress=False, auto_adjust=True)
+            time.sleep(0.5)
+            # 404 에러 종목 방어: threads=False 및 정교한 예외처리
+            df = yf.download(symbol, period="300d", interval="1d", progress=False, auto_adjust=True, threads=False)
+            
             if df.empty or len(df) < 200: continue
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             
@@ -64,49 +79,62 @@ def get_v40_report():
             curr_mfi = float(calculate_mfi(df).iloc[-1])
             v_energy = (curr_mfi * 0.6) + (curr_rsi * 0.4)
 
-            market_data[symbol] = {'df': df, 'price': curr_price, 'rsi': curr_rsi, 'mfi': curr_mfi}
+            market_data[symbol] = {'df': df, 'price': curr_price, 'rsi': curr_rsi, 'mfi': curr_mfi, 'change': (curr_price-prev_price)/prev_price}
 
             if symbol in actual_prey:
-                # [필터 1: 에너지 70% 미만은 리포트에서 영구 제명]
+                # [V-Energy 하한선: 70% 미만 필터]
                 if v_energy < 70 and curr_price > ma200: continue
 
-                # [신분 판정]
                 if (curr_price > ma200) and (prev_price <= ma_series.iloc[-2]):
                     if ma200_slope > 0:
                         kings.append({'symbol': symbol, 'energy': v_energy, 'core': symbol in core_sectors})
                 elif (curr_price < ma200) and (prev_price >= ma_series.iloc[-2]):
                     downgrades.append(symbol)
+        except Exception as e:
+            print(f"Skipping {symbol} due to error: {e}")
+            continue
 
-                # [사냥 구간]
-                if curr_price > ma200 and v_energy >= 70:
-                    if 30 <= curr_rsi <= 55: hits += f"- {symbol}: E:{v_energy:.1f} ✅ [요새]\n"
-                    elif 55 < curr_rsi <= 65: hits += f"- {symbol}: E:{v_energy:.1f} 🔥 [초입]\n"
-        except: continue
+    # 3. [복구] 이면 분석 연산
+    try:
+        if 'SPY' in market_data:
+            spy_c = market_data['SPY']['df']['Close']
+            rs_scores = {}
+            for sec in ['XLK', 'SMH', 'XLB', 'COPX', 'GDX']:
+                if sec in market_data:
+                    ratio = market_data[sec]['df']['Close'] / spy_c
+                    rs_scores[sec] = (ratio.iloc[-1] - ratio.iloc[-5]) / ratio.iloc[-5] * 100
+            
+            if rs_scores:
+                t_rs = (rs_scores.get('XLK', 0) + rs_scores.get('SMH', 0)) / 2
+                r_rs = (rs_scores.get('XLB', 0) + rs_scores.get('COPX', 0) + rs_scores.get('GDX', 0)) / 3
+                v_status = "🚀 전이 포착" if t_rs < 0 and r_rs > 0 else "🚦 혼조"
+                vacuum_msg = f"└ {v_status}: (T:{t_rs:.1f}% / R:{r_rs:.1f}%)\n"
+    except: pass
 
-    # 3. 이면 분석 (동일 유지)
-    # ... (vacuum_msg, oracle_res 연산) ...
+    # 4. [복구] 오라클 연산
+    try:
+        silver = market_data.get('SI=F') or market_data.get('PSLV')
+        rate_change = market_data.get('^IRX', {}).get('change', 0)
+        if silver and silver['rsi'] > 60 and silver['mfi'] > 60:
+            oracle_res = "🌀 유동성 중첩: 실물 강세\n" if rate_change <= 0 else "⚡ 붕괴: 악성 인플레\n"
+    except: pass
 
-    # 4. [필터 2: 나열 금지 및 과열 로직]
+    # 5. 리포트 조립 및 과열 필터
     kings = sorted(kings, key=lambda x: x['energy'], reverse=True)
-    king_count = len(kings)
-    
-    overheat_msg = ""
-    if king_count > 10:
-        overheat_msg = "🚨 *[시장 과열: 사냥 금지]* - 승격 종목 폭주 중\n"
-        kings = kings[:3] # 최강 3개만 남김
+    overheat_msg = "🚨 *[시장 과열: 사냥 금지]*\n" if len(kings) > 10 else ""
+    display_kings = kings[:3] if len(kings) > 10 else kings
     
     true_kings_report = ""
-    for k in kings:
+    for k in display_kings:
         mark = "🚀" if k['core'] else "💎"
         true_kings_report += f"{mark} {k['symbol']}: 에너지 {k['energy']:.1f} 돌파\n"
 
-    # 5. 리포트 조립
     report_1 = (
         f"🛡 *[V40 1회차: 전략 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n"
         f"🌀 *[유동성 지수]*\n{vacuum_msg}\n"
         f"🔮 *[Oracle]*\n{oracle_res}\n"
         f"⚠️ *[신분 변동]*\n{overheat_msg}"
-        f"👑 *[진성 승격]*\n{true_kings_report if kings else '진성 승격 없음'}\n\n"
+        f"👑 *[진성 승격]*\n{true_kings_report if true_kings_report else '진성 승격 없음'}\n\n"
         f"💀 *[강등]*: {', '.join(downgrades[:5])} 외 {max(0, len(downgrades)-5)}종"
     )
 
