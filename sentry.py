@@ -95,3 +95,28 @@ def get_v40_tactical_report():
 
 if __name__ == "__main__":
     get_v40_tactical_report()
+# --- [무전 발송 로직 수선] ---
+    
+    # 1. 일단 엔진이 돌았다는 생존 신호를 무조건 보냅니다.
+    header = f"🛡️ **[V40-C 파수꾼 보고]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
+    status_msg = f"📊 감시 종목: {len(hunting_targets)}개\n"
+    
+    found_any = False
+    report_body = ""
+
+    if shield_a:
+        found_any = True
+        for t in sorted(shield_a, key=lambda x: x['Energy'], reverse=True)[:3]:
+            report_body += f"\n🚨 *[A: 방패 입고]*\n🎯 {t['Symbol']} (E:{t['Energy']:.1f} / A:{t['Alpha']:.2%})\n"
+
+    if spear_b:
+        found_any = True
+        for t in sorted(spear_b, key=lambda x: x['Energy'], reverse=True)[:3]:
+            report_body += f"\n⚔️ *[B: 창의 탄생]*\n🎯 {t['Symbol']} (E:{t['Energy']:.1f})\n"
+
+    # [핵심] 찾은 종목이 없을 때 형님을 안심시키는 무전
+    if not found_any:
+        report_body = "\n✅ **현재 진성 승격 조건(E>=75)을 만족하는 종목이 없습니다.**\n시장 관망을 유지하십시오."
+
+    # 최종 발송
+    send_telegram(header + status_msg + report_body)
