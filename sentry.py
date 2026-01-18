@@ -3,165 +3,127 @@ import yfinance as yf
 import pandas as pd
 import requests
 import time
+import numpy as np
 from datetime import datetime
 
-# --- [초기값 및 환경 변수: 무결성 검증 완료] ---
+# --- [환경 변수 설정] ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
-vacuum_msg = "└ 🚦 유동성 데이터 연산 실패\n"
-oracle_res = "✅ 특이 붕괴 없음\n"
 
-def calculate_rsi(series, period=14):
+def calculate_indicators(df):
     try:
-        delta = series.diff()
+        # RSI
+        delta = df['Close'].diff()
         up = delta.clip(lower=0); down = -1 * delta.clip(upper=0)
-        ema_up = up.ewm(com=period - 1, adjust=False).mean()
-        ema_down = down.ewm(com=period - 1, adjust=False).mean()
-        rs = ema_up / (ema_down + 1e-10)
-        return 100 - (100 / (1 + rs))
-    except: return pd.Series([50.0] * len(series))
-
-def calculate_mfi(df, period=14):
-    try:
+        ema_up = up.ewm(com=13, adjust=False).mean()
+        ema_down = down.ewm(com=13, adjust=False).mean()
+        rsi = 100 - (100 / (1 + (ema_up / (ema_down + 1e-10))))
+        
+        # MFI
         tp = (df['High'] + df['Low'] + df['Close']) / 3
         rmf = tp * df['Volume']
         up_mf = pd.Series(0.0, index=df.index); dn_mf = pd.Series(0.0, index=df.index)
         up_mf[tp > tp.shift(1)] = rmf[tp > tp.shift(1)]
         dn_mf[tp < tp.shift(1)] = rmf[tp < tp.shift(1)]
-        m_r = up_mf.rolling(window=period).sum() / (dn_mf.rolling(window=period).sum() + 1e-10)
-        return 100 - (100 / (1 + m_r))
-    except: return pd.Series([50.0] * len(df))
+        mfi = 100 - (100 / (1 + (up_mf.rolling(14).sum() / (dn_mf.rolling(14).sum() + 1e-10))))
+        
+        return rsi.iloc[-1], mfi.iloc[-1]
+    except: return 50.0, 50.0
 
-def get_v40_report():
-    global vacuum_msg, oracle_res 
+def get_v40_tactical_report():
+    print("📡 [V40-C Tactical] 실시간 전술 무전 엔진 가동...")
     
-    # [설정값 보존]
-    observatories = ['SPY', 'XLK', 'SMH', 'XLB', 'XLE', 'COPX', 'GDX', '^IRX', 'BIL']
-    hunting_targets = ['SI=F', 'HG=F', 'ERO', 'FCX', 'SCCO', 'PSLV', 'CEF']
-    core_sectors = ['FCX', 'SCCO', 'PSLV', 'PPL', 'DTE', 'ASTS', 'SI=F', 'COPX']
-
-    # 1. 엑셀 로드 및 타겟 정밀화
-    file_name = 'KIM_DIRECTOR_HUNTING_V40_REPORT.xlsx'
-    excel_tickers = []
-    if os.path.exists(file_name):
-        try:
-            xls = pd.ExcelFile(file_name)
-            for sheet in xls.sheet_names:
-                df_sheet = pd.read_excel(file_name, sheet_name=sheet)
-                if 'Symbol' in df_sheet.columns:
-                    excel_tickers.extend(df_sheet['Symbol'].dropna().unique().tolist())
-        except Exception as e: print(f"Excel Load Error: {e}")
+    # 1. 대상 징집 (기존 엑셀 + 핵심 섹터)
+    hunting_targets = ['VERO', 'IREN', 'ASTS', 'FCX', 'SCCO', 'PSLV', 'SI=F', 'COPX', 'MARA', 'CLSK']
+    # 형님이 관리하시는 엑셀 파일이 있다면 추가 로드 가능
     
-    actual_prey = list(set([t for t in hunting_targets + excel_tickers if str(t) not in observatories]))
-    all_symbols = list(set(actual_prey + observatories))
+    market_ref = yf.download("SPY", period="20d", progress=False)['Close'].pct_change().sum()
+    
+    shield_a = [] # 1,050만 원 타겟
+    spear_b = []  # 200만 원 타겟
+    danger_c = [] # 소각 대상
+    
+    all_data_for_excel = []
 
-    kings = []
-    downgrades = []
-    market_data = {}
-    all_v_energies = [] 
-    full_analysis_list = [] 
-
-    # 2. 전수 조사 실행 (수성 필터 이식)
-    for symbol in all_symbols:
+    for symbol in hunting_targets:
         try:
-            time.sleep(0.5)
-            df = yf.download(symbol, period="300d", interval="1d", progress=False, auto_adjust=True, threads=False)
+            df = yf.download(symbol, period="250d", progress=False, auto_adjust=True)
             if df.empty or len(df) < 200: continue
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             
-            close = df['Close']
-            # [10일 수성 체크용 시계열 에너지 연산]
-            energies_10d = []
-            for i in range(10):
-                sub_df = df.iloc[:len(df)-i] if i > 0 else df
-                c_rsi = float(calculate_rsi(sub_df['Close']).iloc[-1])
-                c_mfi = float(calculate_mfi(sub_df).iloc[-1])
-                energies_10d.append((c_mfi * 0.6) + (c_rsi * 0.4))
+            curr_price = float(df['Close'].iloc[-1])
+            prev_price = float(df['Close'].iloc[-2])
+            peak_250 = df['Close'].max()
+            mdd = ((curr_price - peak_250) / peak_250) * 100
             
-            curr_v_energy = energies_10d[0]
-            all_v_energies.append(curr_v_energy)
-            v_accel = (curr_v_energy - energies_10d[5]) / (energies_10d[5] + 1e-10) * 100
-            succession_count = sum(1 for e in energies_10d if e >= 80)
+            rsi, mfi = calculate_indicators(df)
+            energy = (mfi * 0.6) + (rsi * 0.4)
+            
+            # Alpha (시장 대비 강도)
+            my_perf = df['Close'].tail(5).pct_change().sum()
+            alpha = my_perf - market_ref
+            
+            # 거래대금 (유동성 체크)
+            avg_vol = (df['Close'] * df['Volume']).tail(20).mean()
+            
+            analysis = {
+                'Symbol': symbol, 'Price': curr_price, 'MDD': mdd, 
+                'Energy': energy, 'Alpha': alpha, 'Vol_Avg': avg_vol
+            }
+            all_data_for_excel.append(analysis)
 
-            ma_series = close.rolling(200).mean()
-            ma200 = ma_series.iloc[-1]
-            ma200_slope = ma200 - ma_series.iloc[-5]
-            curr_price = float(close.iloc[-1]); prev_price = float(close.iloc[-2])
+            # --- [V40-C 전술 판정 로직] ---
+            
+            # 1️⃣ [목돈 사격]: A-Shield (방패)
+            # 조건: MDD -10% 이내 + 에너지 80점 이상 + 시장보다 강함
+            if mdd >= -10 and energy >= 75 and alpha > 0:
+                shield_a.append(analysis)
+                
+            # 2️⃣ [잉여소득]: B-Spear (창)
+            # 조건: 에너지는 높으나 MDD가 -10% ~ -30% 사이 (발아 단계)
+            elif -30 <= mdd < -10 and energy >= 70:
+                spear_b.append(analysis)
+                
+            # 3️⃣ [리밸런싱]: C-Danger (소각)
+            # 조건: MDD -35% 돌파 혹은 에너지 40미만 추락
+            elif mdd < -35 or energy < 40:
+                danger_c.append(analysis)
+                
+        except: continue
 
-            # 엑셀용 데이터 수집 (Negative Check 준수)
-            full_analysis_list.append({
-                'Symbol': symbol, 'Price': curr_price, 'Energy': curr_v_energy, 
-                'Accel': v_accel, 'Succession': succession_count, 'MA200_Dist': (curr_price-ma200)/ma200*100,
-                'RSI': energies_10d[0], 'MFI': energies_10d[0], 'Date': datetime.now().strftime('%Y-%m-%d')
-            })
+    # 1+1-1=Complete: 데이터 보존
+    pd.DataFrame(all_data_for_excel).to_excel(f"V40C_TACTICAL_{datetime.now().strftime('%m%d')}.xlsx")
 
-            market_data[symbol] = {'df': df, 'price': curr_price, 'energy': curr_v_energy, 'accel': v_accel, 'change': (curr_price-prev_price)/prev_price}
+    # --- [전술 무전 발송] ---
+    
+    # 1. 목돈 사격 무전
+    for target in shield_a[:2]: # 너무 많으면 핵심만
+        msg = (f"🚨 *[V40-A: 방패 입고]*\n\n"
+               f"🎯 종목: {target['Symbol']}\n"
+               f"🛡️ 상태: [기관급 수급] - MDD {target['MDD']:.1f}%\n"
+               f"💰 한도: *1,050만 원 (Full 사격)*\n"
+               f"💬 지침: 형님, 성벽 재료입니다. 시장 대비 Alpha({target['Alpha']:.2%}) 확인. 본진 투입 적기입니다.")
+        send_telegram(msg)
 
-            if symbol in actual_prey:
-                # 10일 중 8일 수성 + 200일선 상단 유지 시에만 진성 승격
-                if (curr_price > ma200) and (succession_count >= 8):
-                    phase = "💎 [요새]" if v_accel > 0 else "🚨 [식음]"
-                    kings.append({'symbol': symbol, 'energy': curr_v_energy, 'accel': v_accel, 'phase': phase, 'core': symbol in core_sectors})
-                elif (curr_price < ma200) and (prev_price >= ma_series.iloc[-2]):
-                    downgrades.append(symbol)
-        except Exception as e: continue
+    # 2. 잉여소득 무전
+    for target in spear_b[:2]:
+        msg = (f"⚔️ *[V40-B: 창의 탄생]*\n\n"
+               f"🎯 종목: {target['Symbol']}\n"
+               f"🔥 성질: [신인류/발아] - 에너지 {target['Energy']:.1f}\n"
+               f"💰 한도: *200만 원 (분할 매집)*\n"
+               f"💬 지침: 거래량 실린 진짜 창입니다. 잉여소득으로 개수 늘려가십시오.")
+        send_telegram(msg)
 
-    # 3. [복구 무결성 100%] 이면 분석 (RS Scores)
-    try:
-        if 'SPY' in market_data:
-            spy_c = market_data['SPY']['df']['Close']
-            rs_scores = {}
-            for sec in ['XLK', 'SMH', 'XLB', 'COPX', 'GDX']:
-                if sec in market_data:
-                    # RS(Relative Strength) 연산: 원본 로직 무삭제
-                    ratio = market_data[sec]['df']['Close'] / spy_c
-                    rs_scores[sec] = (ratio.iloc[-1] - ratio.iloc[-5]) / ratio.iloc[-5] * 100
-            if rs_scores:
-                t_rs = (rs_scores.get('XLK', 0) + rs_scores.get('SMH', 0)) / 2
-                r_rs = (rs_scores.get('XLB', 0) + rs_scores.get('COPX', 0) + rs_scores.get('GDX', 0)) / 3
-                v_status = "🚀 전이 포착" if t_rs < 0 and r_rs > 0 else "🚦 혼조"
-                vacuum_msg = f"└ {v_status}: (T:{t_rs:.1f}% / R:{r_rs:.1f}%)\n"
-    except: pass
+    # 3. 리밸런싱 경고
+    if danger_c:
+        msg = (f"💀 *[V40-⚠️: 리밸런싱 경고]*\n\n"
+               f"❌ 대상: {', '.join([d['Symbol'] for d in danger_c[:3]])}\n"
+               f"📉 상황: [소각대상] 전락 / 에너지 붕괴\n"
+               f"💬 지침: 형님, 바람 빠졌습니다. 미련 없이 던지고 A(방패)로 회군하십시오.")
+        send_telegram(msg)
 
-    # 4. [복구 무결성 100%] 오라클 연산 (유동성 중첩)
-    try:
-        silver = market_data.get('SI=F') or market_data.get('PSLV')
-        rate_change = market_data.get('^IRX', {}).get('change', 0)
-        if silver:
-            # 은(Silver)의 개별 에너지 지수 재산출 (원본 디테일 복구)
-            s_rsi = float(calculate_rsi(silver['df']['Close']).iloc[-1])
-            s_mfi = float(calculate_mfi(silver['df']).iloc[-1])
-            if s_rsi > 60 and s_mfi > 60:
-                oracle_res = "🌀 유동성 중첩: 실물 강세\n" if rate_change <= 0 else "⚡ 붕괴: 악성 인플레\n"
-    except: pass
-
-    # [보강] 시장 전체 평균 및 과열 태그
-    market_avg_energy = sum(all_v_energies) / len(all_v_energies) if all_v_energies else 0
-    overheat_tag = "🚨 *[시장 과열: 사냥 금지]*" if market_avg_energy > 65 else "✅ *[정상 유동성]*"
-
-    # [1+1-1=Complete] 엑셀 저장 (분석 결과 전수 보존)
-    final_df = pd.DataFrame(full_analysis_list)
-    final_df.to_excel(f"V40C_FINAL_REPORT_{datetime.now().strftime('%m%d_%H%M')}.xlsx", index=False)
-
-    # 5. 리포트 조립 및 발송
-    kings = sorted(kings, key=lambda x: x['energy'], reverse=True)
-    true_kings_report = ""
-    for k in kings[:5]:
-        mark = "🚀" if k['core'] else "🔥"
-        true_kings_report += f"{mark} {k['symbol']}: {k['phase']} E:{k['energy']:.1f} (A:{k['accel']:+.1f}%)\n"
-
-    report_1 = (
-        f"🛡 *[V40-C: 진성 요새 기상도]*\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n\n"
-        f"🌀 *[이면 분석]*\n{vacuum_msg}\n"
-        f"🔮 *[Oracle]*\n{oracle_res}\n"
-        f"🌀 *[시장 평균 에너지]*: {market_avg_energy:.1f}\n"
-        f"⚠️ *[과열 판정]*: {overheat_tag}\n\n"
-        f"👑 *[진성 승격 (10일 수성)]*\n{true_kings_report if true_kings_report else '수성 성공 종목 없음'}\n"
-        f"💀 *[강등]*: {', '.join(downgrades[:5])}"
-    )
-
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                  data={"chat_id": CHAT_ID, "text": report_1, "parse_mode": "Markdown"})
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
-    get_v40_report()
+    get_v40_tactical_report()
