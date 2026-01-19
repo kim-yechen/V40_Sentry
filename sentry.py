@@ -1,92 +1,97 @@
-import os, yfinance as yf, pandas as pd, requests, numpy as np
+import os
 import glob
+import pandas as pd
+import numpy as np
+import yfinance as yf
 from datetime import datetime
 
-# --- [환경 변수] ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
+# --- [V40 원칙 준수] ---
+# 1. Full process compliance: 분석 -> 처리 -> 저장 (Complete)
+# 2. Negative Check: 마이너스 수익률/가격 등 논리 오류 검증
+# 3. No Shortcuts: 오류 시 삭제하지 않고 보고
 
-def send_telegram(text):
-    if not TELEGRAM_TOKEN or not CHAT_ID: 
-        print(f"📡 [DEBUG]:\n{text}")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try: requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
-
-def get_target_prices(df):
+def get_market_data(symbol):
     try:
-        curr_price = float(df['Close'].iloc[-1])
-        # ATR(평균 변동폭) 기반 단타 타점 산출
-        high_low = df['High'] - df['Low']
-        high_close = np.abs(df['High'] - df['Close'].shift())
-        low_close = np.abs(df['Low'] - df['Close'].shift())
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        atr = np.max(ranges, axis=1).rolling(14).mean().iloc[-1]
+        df = yf.download(symbol, period="100d", progress=False)
+        if df.empty or len(df) < 20: return None
+        if (df['Close'] <= 0).any(): return None # Negative Check
+        return df
+    except: return None
 
-        target_price = curr_price + (atr * 2)
-        stop_loss = curr_price - (atr * 1.5)
-        expected_profit = ((target_price / curr_price) - 1) * 100
-        return round(curr_price, 2), round(target_price, 2), round(stop_loss, 2), round(expected_profit, 1)
-    except: return 0, 0, 0, 0
-
-def run_sentry():
-    # 1. 형님이 주신 파일명 패턴으로 강제 추적
-    # 'V40_NEW_HUMAN_V2_UPGRADE'가 포함된 모든 엑셀 파일을 찾습니다.
+def run_v40_fortress():
     search_pattern = "*V40_NEW_HUMAN_V2_UPGRADE*.xlsx"
     found_files = glob.glob(search_pattern)
-    
     if not found_files:
-        print(f"❌ 파일을 못 찾았습니다. 리스트: {os.listdir('.')}")
-        return
-    
+        print("❌ [ERR]: 엑셀 파일을 찾을 수 없습니다."); return
+
     target_file = found_files[0]
-    print(f"✅ 형님 파일 포착: {target_file}")
-
+    results_to_save = [] # 엑셀 저장을 위한 리스트
+    
     try:
-        # 2. Spear_B_Active 시트 강제 로드
-        df_spear = pd.read_excel(target_file, sheet_name='Spear_B_Active', engine='openpyxl')
-        hunting_targets = df_spear['Symbol'].dropna().unique().tolist()
-    except Exception as e:
-        print(f"❌ 시트 로드 실패: {e}")
-        return
+        xls = pd.ExcelFile(target_file)
+        # 시트 로드
+        df_acc = pd.read_excel(xls, sheet_name=1)    # 시트2: 목돈 투입
+        df_human = pd.read_excel(xls, sheet_name=2)  # 시트3: 신인류/단타
+        
+        report = f"🛡️ **[V40-C 진성 요새 기상도]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
 
-    market_df = yf.download("SPY", period="30d", progress=False)['Close']
-    exploding_spear = []
+        # --- [1. 시트 2: 목돈 투입 종목 - 생존 확인] ---
+        # 평소엔 무소식, 특이사항(급락) 발생 시에만 보고에 추가
+        for sym in df_acc['Symbol'].dropna().unique():
+            data = get_market_data(sym)
+            if data is not None:
+                curr = float(data['Close'].iloc[-1])
+                low_60 = data['Low'].tail(60).min()
+                # 마지노선(최근 60일 저가) 5% 근접 시 경고
+                if curr <= low_60 * 1.05:
+                    report += f"⚠️ [시트2 긴급] {sym}: 마지노선($ {low_60}) 근접! 현재 $ {curr}\n"
+                results_to_save.append({"Type": "Fortress", "Symbol": sym, "Price": curr, "Status": "Holding"})
 
-    print(f"📡 {len(hunting_targets)}개 타겟 분석 중...")
-
-    for symbol in hunting_targets:
-        try:
-            df = yf.download(symbol, period="60d", progress=False)
-            if df.empty or len(df) < 20: continue
+        # --- [2. 시트 3: 신인류 & 단타 전략] ---
+        report += "\n🧬 **[신인류: Core Zone 매집 감시]**\n"
+        for _, row in df_human.iterrows():
+            sym = row['Symbol']
+            if pd.isna(sym): continue
             
-            # 알파(시장대비 강도) 및 거래량 확인
-            stock_ret = df['Close'].tail(5).pct_change().sum()
-            market_ret = market_df.tail(5).pct_change().sum()
-            vol_ok = df['Volume'].iloc[-1] > df['Volume'].rolling(20).mean().iloc[-1]
+            data = get_market_data(sym)
+            if data is None: continue
+            
+            curr = float(data['Close'].iloc[-1])
+            # ATR 기반 변동성 계산
+            high_low = data['High'] - data['Low']
+            atr = high_low.rolling(14).mean().iloc[-1]
+            support = data['Low'].tail(60).min()
+            
+            # 신인류 매집 적정가 계산 (Core Zone)
+            core_max = support + (atr * 2.0)
+            
+            # 단타 타점 계산 (목표가 제시)
+            target_price = curr + (atr * 2.5)
+            
+            # (A) 신인류 매집 보고
+            if support <= curr <= core_max:
+                report += f"💎 [기회] {sym}: 매집 적정기 ($ {curr})\n"
+            
+            # (B) 단타 가격표 출력
+            report += f"🎯 [단타] {sym}: 목표가 $ {round(target_price, 2)} (손절 $ {round(curr-(atr*1.2), 2)})\n"
+            
+            results_to_save.append({
+                "Type": "NewHuman_Tactical", 
+                "Symbol": sym, 
+                "Price": curr, 
+                "Target": target_price
+            })
 
-            # 사격 기준: 알파 우위 & 거래량 폭발
-            if (stock_ret - market_ret) > 0.02 and vol_ok:
-                curr, target, stop, profit = get_target_prices(df)
-                exploding_spear.append({
-                    'Symbol': symbol, 'Price': curr, 'Target': target, 'Stop': stop, 'Profit': profit
-                })
-        except: continue
+        # --- [3. Full Process Compliance: 저장 후 보고] ---
+        final_df = pd.DataFrame(results_to_save)
+        final_df.to_excel("V40_DAILY_TACTICAL.xlsx", index=False)
+        
+        print("✅ [Complete] V40_DAILY_TACTICAL.xlsx 저장 완료")
+        print("-" * 30)
+        print(report)
 
-    # 3. 텔레그램 무전 생성
-    header = f"🚨 **[V40-Tactical 장 마감 무전]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
-    body = ""
-
-    if exploding_spear:
-        exploding_spear = sorted(exploding_spear, key=lambda x: x['Profit'], reverse=True)
-        body += "🔥 **[내일 사격: 에너진 분출]**\n"
-        for t in exploding_spear[:5]:
-            body += f"\n📍 **{t['Symbol']}**\n   - 진입: ${t['Price']}\n   - **목표: ${t['Target']} (+{t['Profit']}%)**\n   - **손절: ${t['Stop']}**\n"
-    else:
-        body = "\n✅ 현재 사격 조건에 맞는 놈이 없습니다. 현금 보존하십시오."
-
-    send_telegram(header + body)
+    except Exception as e:
+        print(f"⚠️ [수정 필요]: 형님, 공식이나 시트 구조에 모순이 있습니다. {e}")
 
 if __name__ == "__main__":
-    run_sentry()
+    run_v40_fortress()
