@@ -1,27 +1,32 @@
 name: V40 Daily Sentry
 on:
   schedule:
-    - cron: '30 22 * * 1-5' # 한국시간 다음날 아침 7:30 발송
-  workflow_dispatch: # 수동 실행 버튼 활성화
-  push: # <-- 이 줄을 추가하십시오. 파일이 바뀔 때마다 즉시 실행됩니다.
+    # 1. 아시아 세션 (한국, 일본, 홍콩) 마감 보고
+    # 한국시간 월~금 오후 5:30 (UTC 08:30)
+    # 월요일 장 마감 결과가 월요일 오후에 즉시 날아옵니다.
+    - cron: '30 08 * * 1-5'
+
+    # 2. 미국/유럽 세션 마감 보고 (기존 유지)
+    # 한국시간 화~토 오전 7:30 (UTC 22:30)
+    # 미국 월요일 장 결과는 화요일 아침에 보고됩니다.
+    - cron: '30 22 * * 1-5'
+
+  workflow_dispatch:
+  push:
     branches: [ main ]
-    
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          
       - name: Install Dependencies
         run: |
-          # 엑셀을 읽기 위해 openpyxl을 추가로 설치합니다.
-          pip install yfinance pandas requests openpyxl 
-          
+          pip install yfinance pandas requests openpyxl
       - name: Run Sentry Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
