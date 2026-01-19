@@ -7,110 +7,102 @@ CHAT_ID = os.environ.get('CHAT_ID')
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not CHAT_ID: 
-        print(text) # 토큰 없으면 화면에 출력
+        print(text)
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try: requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def check_squeeze(df, window=20):
-    """[신념 1: 병목 추적] 가격 변동성은 줄고 에너지는 응축되는가?"""
+def get_target_prices(df):
+    """[신규 로직] 단타용 사격/퇴각 지점 계산"""
     try:
-        # 1. 볼린저 밴드 폭(BB Width)으로 변동성 압착 측정
+        curr_price = float(df['Close'].iloc[-1])
+        high_20 = df['High'].rolling(20).max().iloc[-1]
+        low_20 = df['Low'].rolling(20).min().iloc[-1]
+        atr = (df['High'] - df['Low']).rolling(14).mean().iloc[-1]
+
+        # 1. 진입가(Buy): 전고점 돌파 확인 혹은 현재가
+        # 2. 목표가(Target): 현재가 대비 +ATR의 2배 (단기 에너지 분출 한계선)
+        # 3. 손절가(Stop): 현재가 대비 -ATR의 1.5배 (단타 생명선)
+        target_price = curr_price + (atr * 2)
+        stop_loss = curr_price - (atr * 1.5)
+        expected_profit = ((target_price / curr_price) - 1) * 100
+        
+        return round(curr_price, 2), round(target_price, 2), round(stop_loss, 2), round(expected_profit, 1)
+    except: return 0, 0, 0, 0
+
+def check_squeeze(df, window=20):
+    try:
         std = df['Close'].rolling(window=window).std()
         mean = df['Close'].rolling(window=window).mean()
         bb_width = (std * 4) / mean
-        
-        # 최근 5일간의 변동성이 이전 20일 평균보다 낮은지 확인 (압착 구간)
         is_squeezing = bb_width.iloc[-1] < bb_width.rolling(window=window).mean().iloc[-1]
         return is_squeezing
     except: return False
 
 def calculate_real_alpha(df, market_df):
-    """[신념 2: 진성 알파] 거래대금 가중치를 고려한 시장 대비 초과 수익률"""
     try:
         stock_ret = df['Close'].tail(5).pct_change().sum()
         market_ret = market_df.tail(5).pct_change().sum()
-        # 거래량이 실린 상승인지 확인 (보조지표)
         vol_confirm = df['Volume'].iloc[-1] > df['Volume'].rolling(20).mean().iloc[-1]
         return (stock_ret - market_ret), vol_confirm
     except: return 0.0, False
 
 def get_v40_quantum_sentry():
-    # 1. V2 리포트 자동 동기화 (업그레이드된 기준점 로드)
-    file_name = 'V40_NEW_HUMAN_V2_UPGRADE.xlsx'
+    # 형님, 파일명은 최신 업데이트된 리포트로 고정했습니다.
+    file_name = 'KIM_DIRECTOR_V40_ULTIMATE_REPORT.xlsx' 
     if not os.path.exists(file_name):
-        print(f"❌ 형님, {file_name} 파일이 없습니다. 경로를 확인하십시오.")
+        print(f"❌ {file_name} 파일이 없습니다.")
         return
 
     try:
-        v2_data = pd.read_excel(file_name)
-        # 엑셀에서 형님이 정해둔 등급과 MDD 제한을 가져옴
-        target_info = v2_data.set_index('Symbol')[['V2_Group', 'V2_MDD_Limit', 'V2_Priority_Score']].to_dict('index')
+        # Spear_B_Active 시트가 단타(B그룹)의 핵심입니다.
+        v2_data = pd.read_excel(file_name, sheet_name='Spear_B_Active')
+        target_info = v2_data.set_index('Symbol')[['Grade', 'Nature']].to_dict('index')
         hunting_targets = list(target_info.keys())
-    except Exception as e:
-        print(f"❌ 엑셀 로드 실패: {e}")
+    except:
+        print("❌ 시트 로드 실패. Spear_B_Active 시트를 확인하십시오.")
         return
 
-    # 2. 시장 기준점 확보
     market_df = yf.download("SPY", period="30d", progress=False, auto_adjust=True)['Close']
-
     squeezing_gold, exploding_spear, danger_zone = [], [], []
 
     for symbol in hunting_targets:
         try:
-            df = yf.download(symbol, period="250d", progress=False, auto_adjust=True)
-            if df.empty or len(df) < 50: continue
+            df = yf.download(symbol, period="100d", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 30: continue
             
-            curr_price = float(df['Close'].iloc[-1])
-            peak_250 = df['Close'].max()
-            mdd = ((curr_price - peak_250) / peak_250) * 100
-            
-            # 형님이 정하신 종목별 MDD Limit (A그룹 -35%, B그룹 -15% 등)
-            limit_mdd = target_info[symbol]['V2_MDD_Limit']
-            v2_group = target_info[symbol]['V2_Group']
-            
-            # 알파 및 병목(Squeeze) 확인
+            curr_price, target, stop, profit = get_target_prices(df)
             alpha, vol_ok = calculate_real_alpha(df, market_df)
             is_squeezed = check_squeeze(df)
             
-            res = {'Symbol': symbol, 'MDD': mdd, 'Alpha': alpha, 'Group': v2_group}
+            res = {'Symbol': symbol, 'Price': curr_price, 'Target': target, 'Stop': stop, 'Profit': profit, 'Alpha': alpha}
 
-            # 3. [신념 기반 분류]
-            # MDD 한도 내에 있고, 병목(압착) 중인 진성 텐배거 후보
-            if mdd >= limit_mdd:
-                if is_squeezed:
-                    squeezing_gold.append(res)
-                elif alpha > 0 and vol_ok:
-                    exploding_spear.append(res)
-            else:
-                # 형님이 정한 맷집 한도를 넘어선 놈
-                danger_zone.append(res)
-                
+            # B그룹(Spear)은 무조건 단타 기준 적용
+            if alpha > 0 and vol_ok:
+                exploding_spear.append(res)
+            elif is_squeezed:
+                squeezing_gold.append(res)
         except: continue
 
-    # 4. 형님 전용 언어로 무전 발송
-    header = f"🛡️ **[V40-Sentry v3.0 보고]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
-    status_msg = f"📊 V2 타겟 감시: {len(hunting_targets)}개 동기화 완료\n"
+    # 4. 형님 전용 실전 무전
+    header = f"🚨 **[V40-Tactical 단타 무전]**\n"
     report_body = ""
 
-    if squeezing_gold:
-        report_body += f"\n💎 **[진성 텐배거: 압착구간]**\n(매집 적기 - 힘이 고이고 있습니다)"
-        for t in squeezing_gold[:3]:
-            report_body += f"\n📍 {t['Symbol']} (MDD:{t['MDD']:.1f}% / {t['Group']})"
-
     if exploding_spear:
-        report_body += f"\n\n🚀 **[신인류: 발발구간]**\n(추격 타격 - 에너지가 뿜어져 나옵니다)"
-        for t in exploding_spear[:3]:
-            report_body += f"\n🔥 {t['Symbol']} (Alpha:+{t['Alpha']:.2%})"
+        report_body += f"\n🔥 **[지금 사격: 에너진 분출]**"
+        for t in exploding_spear[:5]:
+            report_body += (f"\n📍 **{t['Symbol']}**\n   - 사격가: ${t['Price']}\n   - 목표가: ${t['Target']} (**+{t['Profit']}%** 예상)\n   - 퇴각선: ${t['Stop']}")
 
-    if danger_zone:
-        report_body += f"\n\n💀 **[경고: 맷집 초과]**\n소각 검토: {', '.join([d['Symbol'] for d in danger_zone[:5]])}"
+    if squeezing_gold:
+        report_body += f"\n\n💎 **[매복 중: 에너지 압착]**"
+        for t in squeezing_gold[:3]:
+            report_body += f"\n📍 {t['Symbol']} (준비금 확보 - 발발 대기)"
 
-    if not squeezing_gold and not exploding_spear:
-        report_body = "\n✅ **현재 압착/발발 종목 없음**\n형님, 잉여 현금을 보존하며 매복하십시오."
+    if not report_body:
+        report_body = "\n✅ 시장 에너지가 과열 상태입니다. 무지성 사격 금지."
 
-    send_telegram(header + status_msg + report_body)
+    send_telegram(header + report_body)
 
 if __name__ == "__main__":
     get_v40_quantum_sentry()
