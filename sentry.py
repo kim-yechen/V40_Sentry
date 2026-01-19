@@ -16,7 +16,7 @@ def send_telegram(text):
     for i in range(0, len(text), 4000):
         requests.post(url, data={"chat_id": CHAT_ID, "text": text[i:i+4000], "parse_mode": "Markdown"}, timeout=20)
 
-def run_v40_quantum_sentry():
+def run_v40_final_layered_sentry():
     files = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")
     if not files: return
     target_file = files[0]
@@ -24,76 +24,85 @@ def run_v40_quantum_sentry():
 
     try:
         xls = pd.ExcelFile(target_file)
-        df_fortress = pd.read_excel(xls, sheet_name=1) 
-        df_new_human = pd.read_excel(xls, sheet_name=2) 
+        df_fortress = pd.read_excel(xls, sheet_name=1) # 1층 (시트2)
+        df_new_human = pd.read_excel(xls, sheet_name=2) # 2,3층 (시트3)
         
         all_syms = list(set(list(df_fortress['Symbol'].dropna()) + list(df_new_human['Symbol'].dropna()) + special_watch))
-        # 3개월 타임라인 분석을 위해 데이터를 200일치 넉넉히 가져옵니다.
+        # 퀀텀 분석을 위해 200일 데이터 확보
         raw = yf.download(all_syms, period="200d", group_by='ticker', progress=False, threads=True)
         
-        report = f"🛡️ **[V40-C 퀀텀 압착 지령]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
+        report = f"🛡️ **[V40-C 정예 복합 지령]**\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
 
-        # --- [1층: 요새 긴급상황] ---
-        # (생략: 위와 동일한 로직으로 마지노선 5% 이내 종목 보고)
+        # --- [1층: 요새 (무소식이 희소식)] ---
+        emergency = ""
+        for sym in list(set(list(df_fortress['Symbol'].dropna()) + special_watch)):
+            data = raw[sym]
+            curr = float(data['Close'].iloc[-1])
+            low_60 = data['Low'].tail(60).min()
+            dist = (curr / low_60 - 1) * 100
+            if dist <= 5.0: # 마지노선 5% 이내만 긴급 보고
+                emergency += f"🚨 {sym}: $ {curr:.2f} (마지노선 {dist:.1f}% 남음)\n"
+        
+        if emergency: report += "\n🏰 **[1층: 요새 긴급대응]**\n" + emergency
+        else: report += "\n🏰 **[1층: 요새]** 모든 전선 이상 무 (평온)\n"
 
-        # --- [2, 3층: 퀀텀 압착 엔진 가동] ---
+        # --- [2, 3층 통합 분석 엔진] ---
+        human_report = ""
         tactical_pool = []
+        
         for sym in df_new_human['Symbol'].dropna().unique():
             try:
                 data = raw[sym]
                 if len(data) < 130: continue
-                
                 close = data['Close']
                 vol = data['Volume']
                 returns = close.pct_change()
+                curr_price = float(close.iloc[-1])
 
-                # [V40 핵심 수식 주입]
-                # 1. V-Energy (거래량 에너지 강도)
+                # 퀀텀 수식 (EDI 압착)
                 v_energy = (vol.pct_change().rolling(10).std() * returns.rolling(10).std() * 10000).fillna(0)
-                # 2. EDI (압착 지수: 에너지가 주가 변동성보다 얼마나 큰가)
                 price_vol = returns.rolling(120).std()
                 edi = v_energy.rolling(120).mean() / (price_vol + 1e-9)
-                # 3. 위상차 (Corr: 가격과 에너지의 역행 여부)
-                corr = close.rolling(20).corr(v_energy)
-
-                curr_price = float(close.iloc[-1])
-                curr_edi = edi.iloc[-1]
-                curr_corr = corr.iloc[-1]
                 
-                # 타점 분석: 바닥권 확인
+                # 타점 및 목표가 산정
                 support = data['Low'].tail(60).min()
                 atr = (data['High'] - data['Low']).rolling(14).mean().iloc[-1]
-                target = curr_price + (atr * 3.5) # 3개월 목표이므로 더 높게 설정
+                core_max = support + (atr * 2.0) # 매집 적정가 상한선
+                target = curr_price + (atr * 3.5) # 통계적 목표가
+                
+                # 거래대금 필터 (하루 50만불 미만 잡주 제외)
+                if (vol.iloc[-1] * curr_price) < 500000: continue
 
-                # [필터 조건]: 
-                # 1. EDI가 400 이상 (압착 진행 중)
-                # 2. 현재가가 바닥에서 너무 멀어지지 않았을 것 (미발발 상태)
-                if curr_edi > 400 and curr_price <= (support + (atr * 2.0)):
+                # [2층 보고용]: 매집 구간에 있는 놈들
+                if support <= curr_price <= core_max:
+                    human_report += f"💎 {sym}: $ {curr_price:.2f} (적정가 ~{core_max:.1f})\n"
+
+                # [3층 후보군]: EDI 400 이상 압착주
+                if edi.iloc[-1] > 400:
                     tactical_pool.append({
                         'sym': sym, 'curr': curr_price, 'target': target,
-                        'edi': curr_edi, 'corr': curr_corr,
-                        'upside': ((target / curr_price) - 1) * 100
+                        'edi': edi.iloc[-1], 'upside': ((target/curr_price)-1)*100
                     })
             except: continue
 
-        # 압착 강도(EDI)가 높은 순으로 TOP 5 선정 (발사 직전 에너지가 큰 놈들)
+        # --- [2층 무전 출력] ---
+        if human_report:
+            report += "\n🧬 **[2층: 신인류 매집 적정가]**\n" + "\n".join(human_report.split("\n")[:10]) # 너무 많으면 상위 10개만
+
+        # --- [3층 무전 출력 (퀀텀 TOP 5)] ---
         elite_5 = sorted(tactical_pool, key=lambda x: x['edi'], reverse=True)[:5]
-
         if elite_5:
-            report += "\n🚀 **[3개월 내 폭발 예상 TOP 5]**\n"
-            report += "`종목   | 현재가 | 압착강도 | 목표가`\n"
+            report += "\n🚀 **[3층: 퀀텀 압착 TOP 5 (3개월)]**\n"
+            report += "`종목   | 현재가 | 목표가(기대치)`\n"
             for t in elite_5:
-                # 에너지가 응축되었음을 표시하는 아이콘
-                report += f"🔋 `{t['sym']:<6} | {t['curr']:>6.2f} | {int(t['edi']):>6} | {t['target']:>6.2f}`\n"
-        else:
-            report += "\n⚪ 현재 에너지가 응축된 종목이 발견되지 않았습니다.\n"
+                report += f"🔋 `{t['sym']:<6} | {t['curr']:>6.2f} | {t['target']:>6.2f} (+{t['upside']:.1f}%)`\n"
 
-        # [Full Process Compliance]
-        pd.DataFrame(tactical_pool).to_excel("V40_QUANTUM_REPORT.xlsx", index=False)
+        # [Full Process] 저장 후 전송
+        pd.DataFrame(tactical_pool).to_excel("V40_FINAL_TACTICAL.xlsx", index=False)
         send_telegram(report)
 
     except Exception as e:
         send_telegram(f"⚠️ 에러: {str(e)}")
 
 if __name__ == "__main__":
-    run_v40_quantum_sentry()
+    run_v40_final_layered_sentry()
