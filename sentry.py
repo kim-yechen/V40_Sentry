@@ -35,9 +35,6 @@ def run_v40_absolute_global_14():
             # 2. 유럽/영미권/기타 9개 전선 강제 주입
             # 엑셀 티커 형태에 따라 Suffix가 없는 경우, 주요 시장을 순차적으로 강제 매핑
             # (영국, 독일, 프랑스, 네덜란드, 이탈리아, 캐나다, 호주, 인도, 미국)
-            
-            # 형님, 엑셀에 국가 정보가 없다면 아래 리스트를 '강제 순회'하거나 
-            # 특정 심볼 규칙을 적용해야 합니다. 우선 14개국 규격 명시합니다.
             suffixes = {
                 "UK": ".L",   # 6. 영국
                 "DE": ".DE",  # 7. 독일
@@ -115,14 +112,16 @@ def run_v40_absolute_global_14():
                 if is_turnaround:
                     atr = (df['High'] - df['Low']).rolling(14).mean().iloc[-1]
                     pool_3.append({'sym': sym, 'curr': curr_price, 'target': curr_price + (atr * 4.0), 'edi': edi})
-
             except: continue
 
         # [V40 원칙: 저장 후 보고]
         final_df = pd.DataFrame(pool_3 if pool_3 else pool_2)
         final_df.to_excel("V40_GLOBAL_14_FINAL_REPORT.xlsx", index=False)
+        
+        # [V40 텔레그램 전송: 형님 요구사항 반영 (3줄)]
         t, c = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0", "198757117"
-        requests.post(f"https://api.telegram.org/bot{t}/sendMessage", json={"chat_id": c, "text": f"✅ V40 제압 완료"})
+        report = f"🏰요새:{len(fortress_list)}개\n" + "\n".join(fortress_list[:10]) + f"\n🧬정예:{sorted(pool_2, key=lambda x:x['edi'], reverse=True)[0]['sym']}\n🚀퀀텀:{sorted(pool_3 if pool_3 else pool_2, key=lambda x:x.get('edi',0), reverse=True)[0]['sym']}"
+        requests.post(f"https://api.telegram.org/bot{t}/sendMessage", json={"chat_id": c, "text": f"✅ V40 제압 리포트\n{report}"})
 
         print(f"\n✅ 14개국 전선 제압 완료: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         print(f"🏰 [1층 요새] - {len(fortress_list)}개")
