@@ -1,4 +1,4 @@
-import os
+ㅜimport os
 import glob
 import pandas as pd
 import yfinance as yf
@@ -21,18 +21,21 @@ def run_v40_absolute_global_14():
         df_a = pd.read_excel(xls, sheet_name=1) 
         df_b = pd.read_excel(xls, sheet_name=2) 
         
-        # [14개국 전선 강제 박제 엔진] - 국가별 티커 규격 강제 매핑 로직
+        # [14개국 전선 강제 박제 엔진 - 아시아 티커 복원 버전]
         def get_global_ticker(s):
             s = str(s).strip().upper()
-            if '.' in s: return s # 이미 접미사가 붙어있으면 그대로 반환
-            
-            # 1. 아시아 5개 전선 (숫자 체계 기반 강제 변환)
+            if '.' in s: return s 
+
             if s.isdigit():
-                if len(s) == 6: return s + ".KS" # 한국 KOSPI/KOSDAQ
-                if len(s) == 4: return s + ".T"  # 일본 도쿄 거래소
-                if len(s) == 5: return s + ".HK" # 홍콩 거래소
-                if s.startswith('6'): return s + ".SS" # 중국 상해 거래소
-                if s.startswith(('0','3')): return s + ".SZ" # 중국 심천 거래소
+                # 일본: 4자리 이하 (예: 9984 -> 9984.T)
+                if len(s) <= 4:
+                    return s.zfill(4) + ".T"
+                # 홍콩: 5자리 (예: 700 -> 00700.HK)
+                elif len(s) == 5:
+                    return s.zfill(5) + ".HK"
+                # 한국: 6자리 혹은 그 이하 (예: 5380 -> 005380.KS)
+                elif len(s) == 6 or len(s) < 6:
+                    return s.zfill(6) + ".KS"
             
             # 2. 유럽 및 영미권 9개 전선 강제 주입 (Suffix 매핑)
             # (영국, 독일, 프랑스, 네덜란드, 이탈리아, 캐나다, 호주, 인도, 미국)
