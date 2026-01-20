@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 import time
 
-# --- [V40 원칙 준수: 시트 인덱스 교정 및 누수 차단] ---
+# --- [V40 원칙 준수: 불필요 시트 배제 및 정예 분석] ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
@@ -16,7 +16,7 @@ def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         for i in range(0, len(text), 4000):
-            res = requests.post(url, data={"chat_id": CHAT_ID, "text": text[i:i+4000]}, timeout=30)
+            requests.post(url, data={"chat_id": CHAT_ID, "text": text[i:i+4000]}, timeout=30)
     except: pass
 
 def run_v40_final_layered_sentry():
@@ -27,15 +27,13 @@ def run_v40_final_layered_sentry():
     special_watch = ['SLV', 'SCCO', 'FCX']
 
     try:
-        # [핵심 교정] 시트 인덱스 0, 1, 2만 정확히 호출 (3번 호출 금지)
         xls = pd.ExcelFile(target_file)
         
-        # 시트 이름이나 인덱스로 정확히 매칭 (Spear, Shield, Full Spectrum) 
-        df_sheet1 = pd.read_excel(xls, sheet_name=1) 
-        df_sheet2 = pd.read_excel(xls, sheet_name=2) 
+        # [형님 지령] 맨 앞(Index 0) 시트 무시, 1번과 2번만 로드
+        df_sheet1 = pd.read_excel(xls, sheet_name=1) # 요새
+        df_sheet2 = pd.read_excel(xls, sheet_name=2) # 신인류
         
-        # [티커 누수 차단] 모든 시트의 'Symbol' 컬럼 전수 합합
-        # .KS, .T, .HK, .DE, .L, .PA 등 전 세계 티커 보존
+        # [티커 누수 차단] 시트 1, 2의 Symbol + special_watch 통합
         all_raw_syms = pd.concat([
             df_sheet1['Symbol'], 
             df_sheet2['Symbol'],
@@ -44,15 +42,15 @@ def run_v40_final_layered_sentry():
         
         all_syms = [str(s).strip() for s in all_raw_syms]
         
-        print(f"🌐 총 {len(all_syms)}개 종목 전수조사 시작... (인덱스 오류 해결 완료)")
+        # 종목 수가 2900개가 넘으므로 20분 이상 소요되는 것이 정상입니다.
+        print(f"🌐 총 {len(all_syms)}개 종목 전수조사 시작... (오류 수정 완료)")
         
-        # 전 세계 데이터 정밀 다운로드
         raw = yf.download(all_syms, period="200d", group_by='ticker', progress=True, threads=True, timeout=60)
         
         report = f"🛡️ [V40-C 정예 복합 지령]\n📅 {datetime.now().strftime('%m/%d %H:%M')}\n"
         report += f"🌍 전 세계 {len(all_syms)}개 전선 정밀 스캔 완료\n"
 
-        # --- [1층: 요새] --- (df_sheet1 기준 원본 로직)
+        # --- [1층: 요새] --- (df_sheet1 기준)
         emergency = ""
         fortress_targets = list(set(list(df_sheet1['Symbol'].dropna().astype(str)) + special_watch))
         for sym in fortress_targets:
@@ -67,11 +65,12 @@ def run_v40_final_layered_sentry():
             except: continue
         report += "\n🏰 [1층: 요새 긴급대응]\n" + (emergency if emergency else "전선 이상 무\n")
 
-        # --- [2, 3층 통합 엔진] --- (df_sheet0 기준 신인류 로직)
+        # --- [2, 3층 통합 엔진] --- (df_sheet2 기준 / df_sheet0 참조 오류 수정)
         human_pool = []
         tactical_pool = []
         
-        for sym in df_sheet0['Symbol'].dropna().unique():
+        # [수정] 필요 없는 df_sheet0 대신 df_sheet2(신인류)를 기반으로 퀀텀 분석 수행
+        for sym in df_sheet2['Symbol'].dropna().unique():
             sym = str(sym).strip()
             try:
                 data = raw[sym]
@@ -80,7 +79,7 @@ def run_v40_final_layered_sentry():
                 returns = close.pct_change()
                 curr_price = float(close.iloc[-1])
 
-                # [퀀텀 EDI 수식]
+                # [퀀텀 EDI 수식] 원본 보존
                 v_energy = (vol.pct_change().rolling(10).std() * returns.rolling(10).std() * 10000).fillna(0)
                 edi = (v_energy.rolling(120).mean() / (returns.rolling(120).std() + 1e-9)).iloc[-1]
                 
@@ -111,7 +110,7 @@ def run_v40_final_layered_sentry():
         # [Full Process Compliance] 저장 후 전송
         pd.DataFrame(tactical_pool).to_excel("V40_QUANTUM_FINAL.xlsx", index=False)
         send_telegram(report)
-        print("✅ 오류 수정 및 전수조사 완료")
+        print("✅ 정예 분석 및 텔레그램 보고 완료")
 
     except Exception as e:
         print(f"⚠️ 시스템 치명적 에러: {e}")
