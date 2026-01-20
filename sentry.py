@@ -67,8 +67,8 @@ def run_v40_absolute_global_14():
         # [추가 로직] 탈락 사유 추적을 위한 카운터 (밀도 상승)
         fail_stats = {"Data_Empty": [], "Short_Period": [], "Fetch_Err": []}
         
-        # [온도계 전용 리스트 초기화]
-        market_heats = {"US": [], "ASIA": [], "EU": []}
+        # [온도계 세분화: 아시아 전선 해체]
+        market_heats = {"US": [], "KR": [], "JP": [], "HK": [], "EU": []}
         
         for sym in all_syms:
             try:
@@ -78,20 +78,19 @@ def run_v40_absolute_global_14():
                 if not df.empty and len(df) > 100:
                     full_data[sym] = df
                     
-                    # --- 온도계 수집 엔진 시작 ---
-                    # 1. 국가 분류
-                    if any(x in sym for x in [".KS", ".T", ".HK", ".SS", ".SZ"]):
-                        cat = "ASIA"
-                    elif any(x in sym for x in [".L", ".DE", ".PA", ".AS", ".MI"]):
-                        cat = "EU"
-                    else:
-                        cat = "US"
+                    # --- [포인트 1] 국가별 정밀 온도계 분류 ---
+                    if any(x in sym for x in [".KS", ".KQ"]): cat = "KR"    # 대한민국
+                    elif ".T" in sym: cat = "JP"                           # 일본
+                    elif ".HK" in sym: cat = "HK"                          # 홍콩
+                    elif any(x in sym for x in [".L", ".DE", ".PA", ".AS", ".MI"]): cat = "EU"
+                    else: cat = "US"
 
-                    # 2. 바닥(100일) 대비 현재 상승 열기 계산
-                    low_v_temp = df['Low'].tail(100).min()
-                    heat_val = (float(df['Close'].iloc[-1]) / low_v_temp - 1) * 100
+                    # 고점 근접도 계산 (현대차, 한화 등 주도주 화력 반영)
+                    high_v_temp = df['High'].tail(120).max()
+                    heat_val = (float(df['Close'].iloc[-1]) / high_v_temp) * 100
                     market_heats[cat].append(heat_val)
-                    # --- 온도계 수집 엔진 끝 ---
+
+                    # --- 엔진 끝 ---
                     
                     if '.' in sym: 
                         print(f"✅ 해외 전선 데이터 확보 성공: {sym}")
@@ -159,13 +158,16 @@ def run_v40_absolute_global_14():
         final_report_df = pd.DataFrame(pool_3 if pool_3 else pool_2)
         final_report_df.to_excel("V40_GLOBAL_14_FINAL_REPORT.xlsx", index=False)
         
-        # --- 온도계 결과 산출 시작 ---
+        # --- [포인트 2] 5개 권역별 독립 온도계 산출 ---
         def get_avg(l): return sum(l)/len(l) if l else 0
 
-        heat_report = (f"🌡️ [시장 온도계]\n"
-                       f"🇺🇸 미국: {get_avg(market_heats['US']):.1f}% 반등\n"
-                       f"🌏 아시아: {get_avg(market_heats['ASIA']):.1f}% 반등\n"
-                       f"🇪🇺 유럽: {get_avg(market_heats['EU']):.1f}% 반등")
+        heat_report = (f"🌡️ [국가별 시장 온도계 (100% 만점)]\n"
+                       f"🇰🇷 한국: {get_avg(market_heats['KR']):.1f}% (현대차/한화 등 주도주 화력)\n"
+                       f"🇺🇸 미국: {get_avg(market_heats['US']):.1f}% (정점 점유율)\n"
+                       f"🇯🇵 일본: {get_avg(market_heats['JP']):.1f}% (니케이 탄력)\n"
+                       f"🇭🇰 홍콩: {get_avg(market_heats['HK']):.1f}% (중화권 회복세)\n"
+                       f"🇪🇺 유럽: {get_avg(market_heats['EU']):.1f}% (안정적 흐름)")
+        
         # --- 온도계 결과 산출 끝 ---
 
         # [텔레그램 풀 리포트 전송]
