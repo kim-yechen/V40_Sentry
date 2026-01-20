@@ -30,15 +30,13 @@ def run_v40_final_layered_sentry():
         # [핵심 교정] 시트 인덱스 0, 1, 2만 정확히 호출 (3번 호출 금지)
         xls = pd.ExcelFile(target_file)
         
-        # 시트 이름이나 인덱스로 정확히 매칭 (Spear, Shield, Full Spectrum)
-        df_sheet0 = pd.read_excel(xls, sheet_name=0) 
+        # 시트 이름이나 인덱스로 정확히 매칭 (Spear, Shield, Full Spectrum) 
         df_sheet1 = pd.read_excel(xls, sheet_name=1) 
         df_sheet2 = pd.read_excel(xls, sheet_name=2) 
         
         # [티커 누수 차단] 모든 시트의 'Symbol' 컬럼 전수 합합
         # .KS, .T, .HK, .DE, .L, .PA 등 전 세계 티커 보존
         all_raw_syms = pd.concat([
-            df_sheet0['Symbol'], 
             df_sheet1['Symbol'], 
             df_sheet2['Symbol'],
             pd.Series(special_watch)
