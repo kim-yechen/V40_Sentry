@@ -67,6 +67,9 @@ def run_v40_absolute_global_14():
         # [추가 로직] 탈락 사유 추적을 위한 카운터 (밀도 상승)
         fail_stats = {"Data_Empty": [], "Short_Period": [], "Fetch_Err": []}
         
+        # [온도계 전용 리스트 초기화]
+        market_heats = {"US": [], "ASIA": [], "EU": []}
+        
         for sym in all_syms:
             try:
                 # 개별 종목별로 history 직접 호출하여 데이터 확보율 100% 도전
@@ -74,6 +77,22 @@ def run_v40_absolute_global_14():
                 df = ticker_obj.history(period="250d")
                 if not df.empty and len(df) > 100:
                     full_data[sym] = df
+                    
+                    # --- 온도계 수집 엔진 시작 ---
+                    # 1. 국가 분류
+                    if any(x in sym for x in [".KS", ".T", ".HK", ".SS", ".SZ"]):
+                        cat = "ASIA"
+                    elif any(x in sym for x in [".L", ".DE", ".PA", ".AS", ".MI"]):
+                        cat = "EU"
+                    else:
+                        cat = "US"
+
+                    # 2. 바닥(100일) 대비 현재 상승 열기 계산
+                    low_v_temp = df['Low'].tail(100).min()
+                    heat_val = (float(df['Close'].iloc[-1]) / low_v_temp - 1) * 100
+                    market_heats[cat].append(heat_val)
+                    # --- 온도계 수집 엔진 끝 ---
+                    
                     if '.' in sym: 
                         print(f"✅ 해외 전선 데이터 확보 성공: {sym}")
                 elif df.empty:
@@ -140,6 +159,15 @@ def run_v40_absolute_global_14():
         final_report_df = pd.DataFrame(pool_3 if pool_3 else pool_2)
         final_report_df.to_excel("V40_GLOBAL_14_FINAL_REPORT.xlsx", index=False)
         
+        # --- 온도계 결과 산출 시작 ---
+        def get_avg(l): return sum(l)/len(l) if l else 0
+
+        heat_report = (f"🌡️ [시장 온도계]\n"
+                       f"🇺🇸 미국: {get_avg(market_heats['US']):.1f}% 반등\n"
+                       f"🌏 아시아: {get_avg(market_heats['ASIA']):.1f}% 반등\n"
+                       f"🇪🇺 유럽: {get_avg(market_heats['EU']):.1f}% 반등")
+        # --- 온도계 결과 산출 끝 ---
+
         # [텔레그램 풀 리포트 전송]
         t, c = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0", "198757117"
         
@@ -151,6 +179,7 @@ def run_v40_absolute_global_14():
         fail_summary = f"📉 기준미달(5%↑): {len(criteria_fail)}건\n📉 데이터누락: {len(fail_stats['Data_Empty'])}건"
         
         full_msg = (f"✅ V40 제압 리포트 ({datetime.now().strftime('%m-%d %H:%M')})\n\n"
+                    f"{heat_report}\n\n"
                     f"🏰 [1층 요새] - {len(fortress_list)}개\n" + "\n".join(fortress_list[:10]) + 
                     f"\n\n🧬 [2층 정예 5선]\n{p2_report}\n\n"
                     f"🚀 [3층 퀀텀 TOP 5]\n{p3_report}\n\n{fail_summary}")
@@ -159,6 +188,7 @@ def run_v40_absolute_global_14():
 
         # 터미널 실시간 모니터링 출력
         print(f"\n✅ 14개국 전선 제압 완료: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        print(heat_report)
         print(f"🏰 [1층 요새] - {len(fortress_list)}개")
         for line in fortress_list[:15]: print(line)
         
