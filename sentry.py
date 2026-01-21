@@ -76,9 +76,10 @@ def run_v40_absolute_global_14():
             all_syms.append(s)
         
 
-        # 전체 종목 리스트 통합 및 직접 보정
-        all_syms_raw = pd.concat([df_a['Symbol'], df_b['Symbol']]).dropna().unique()
+        # [수선] 정의되지 않은 df_a, df_b 대신 df_master 사용
+        all_syms_raw = df_master['Symbol'].dropna().unique() 
         all_syms = []
+        # (그 아래 for문 로직은 형님 버전 그대로 유지...)
         for s in all_syms_raw:
             s = str(s).strip().upper()
             if s.endswith('L') and '.' not in s: s = s[:-1] + '.L'
