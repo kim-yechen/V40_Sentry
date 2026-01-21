@@ -75,19 +75,30 @@ def run_v40_absolute_global_14():
         
         for sym in all_syms:
             try:
-                # 개별 종목별로 history 직접 호출하여 데이터 확보율 100% 도전
+                # [개별 타격 엔진 강화] - 아시아 데이터는 안 주면 3번까지 재청구
                 ticker_obj = yf.Ticker(sym)
-                df = ticker_obj.history(period="250d")
+                df = pd.DataFrame()
+                
+                for attempt in range(3): # 최대 3번 시도
+                    df = ticker_obj.history(period="250d")
+                    if not df.empty: break
+                    time.sleep(0.5) # 실패 시 0.5초 쉬고 재시도
+                
                 if not df.empty and len(df) > 100:
-                    full_data[sym] = df
+                    full_data[sym] = df  # <--- 이 줄이 반드시 있어야 나중에 분석이 됩니다!
                     
-                    # --- [포인트 1] 국가별 정밀 온도계 분류 ---
-                    if any(x in sym for x in [".KS", ".KQ"]): cat = "KR"    # 대한민국
-                    elif ".T" in sym: cat = "JP"                           # 일본
-                    elif ".HK" in sym: cat = "HK"                          # 홍콩
+                    # --- [온도계 계산 로직 시작] ---
+                    if ".KS" in sym or ".KQ" in sym: cat = "KR"
+                    elif ".T" in sym: cat = "JP"
+                    elif ".HK" in sym: cat = "HK"
                     elif any(x in sym for x in [".L", ".DE", ".PA", ".AS", ".MI"]): cat = "EU"
                     else: cat = "US"
 
+                    high_v_temp = df['High'].tail(120).max()
+                    heat_val = (float(df['Close'].iloc[-1]) / high_v_temp) * 100
+                    market_heats[cat].append(heat_val)
+                    # --- [온도계 계산 로직 끝] ---
+                    
                     # 고점 근접도 계산 (현대차, 한화 등 주도주 화력 반영)
                     high_v_temp = df['High'].tail(120).max()
                     heat_val = (float(df['Close'].iloc[-1]) / high_v_temp) * 100
