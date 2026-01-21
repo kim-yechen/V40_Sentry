@@ -23,28 +23,33 @@ def run_v40_absolute_global_14():
         
         # [14개국 전선 강제 박제 엔진 - 아시아 티커 복원 버전]
         def run_v40_fixed():
-    # 1. 형님이 올려주신 파일 정확히 타격
-    target = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")[0]
+    # 1. 파일 찾기 (들여쓰기 4칸 확인 완료)
+    target_files = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")
+    if not target_files:
+        print("❌ 파일을 찾을 수 없습니다.")
+        return
+    
+    target = target_files[0]
     xls = pd.ExcelFile(target)
     
-    # 2. 형님이 말씀하신 'Full_Spectrum' 시트만 정직하게 읽기
+    # 2. 'Full_Spectrum' 시트 직접 타격
     df_master = pd.read_excel(xls, sheet_name='Full_Spectrum')
     
-    # 3. 형님이 이미 완벽하게 세팅한 티커 그대로 가져오기 (보정 따위 안 함)
+    # 3. 엑셀 티커 그대로 추출 (보정 없이 그대로 사용)
     all_syms = [str(s).strip().upper() for s in df_master['Symbol'].dropna().unique()]
     
-    print(f"✅ 확인 완료: {len(all_syms)}개 종목을 엑셀 그대로 분석합니다.")
+    print(f"✅ 확인 완료: {len(all_syms)}개 종목 분석 시작")
 
     market_heats = {"KR": [], "US": [], "JP": [], "HK": [], "EU": []}
 
     for sym in all_syms:
         try:
-            # 티커 그대로 타격 (이미 .KS, .T 등이 붙어 있으므로)
+            # 4. 티커 그대로 야후에 던짐
             t_obj = yf.Ticker(sym)
             h = t_obj.history(period="250d")
             
             if not h.empty:
-                # 국가 분류 로직만 정교하게
+                # 국가 분류
                 if ".KS" in sym or ".KQ" in sym: cat = "KR"
                 elif ".T" in sym: cat = "JP"
                 elif ".HK" in sym: cat = "HK"
@@ -54,7 +59,7 @@ def run_v40_absolute_global_14():
                 high_120 = h['High'].tail(120).max()
                 heat = (float(h['Close'].iloc[-1]) / high_120) * 100
                 market_heats[cat].append(heat)
-        except Exception as e:
+        except:
             continue
 
     # 이후 온도계 출력...
