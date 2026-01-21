@@ -22,34 +22,42 @@ def run_v40_absolute_global_14():
         df_b = pd.read_excel(xls, sheet_name=2) 
         
         # [14개국 전선 강제 박제 엔진 - 아시아 티커 복원 버전]
-        def get_global_ticker(s):
-            s = str(s).strip().upper()
-            if '.' in s: return s 
+        def run_v40_fixed():
+    # 1. 형님이 올려주신 파일 정확히 타격
+    target = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")[0]
+    xls = pd.ExcelFile(target)
+    
+    # 2. 형님이 말씀하신 'Full_Spectrum' 시트만 정직하게 읽기
+    df_master = pd.read_excel(xls, sheet_name='Full_Spectrum')
+    
+    # 3. 형님이 이미 완벽하게 세팅한 티커 그대로 가져오기 (보정 따위 안 함)
+    all_syms = [str(s).strip().upper() for s in df_master['Symbol'].dropna().unique()]
+    
+    print(f"✅ 확인 완료: {len(all_syms)}개 종목을 엑셀 그대로 분석합니다.")
 
-            if s.isdigit():
-                # 일본: 4자리 이하 (예: 9984 -> 9984.T)
-                if len(s) <= 4:
-                    return s.zfill(4) + ".T"
-                # 홍콩: 5자리 (예: 700 -> 00700.HK)
-                elif len(s) == 5:
-                    return s.zfill(5) + ".HK"
-                # 한국: 6자리 혹은 그 이하 (예: 5380 -> 005380.KS)
-                elif len(s) == 6 or len(s) < 6:
-                    return s.zfill(6) + ".KS"
+    market_heats = {"KR": [], "US": [], "JP": [], "HK": [], "EU": []}
+
+    for sym in all_syms:
+        try:
+            # 티커 그대로 타격 (이미 .KS, .T 등이 붙어 있으므로)
+            t_obj = yf.Ticker(sym)
+            h = t_obj.history(period="250d")
             
-            # 2. 유럽 및 영미권 9개 전선 강제 주입 (Suffix 매핑)
-            # (영국, 독일, 프랑스, 네덜란드, 이탈리아, 캐나다, 호주, 인도, 미국)
-            suffixes = {
-                "UK": ".L",   # 영국 런던
-                "DE": ".DE",  # 독일 프랑크푸르트
-                "FR": ".PA",  # 프랑스 파리
-                "NL": ".AS",  # 네덜란드 암스테르담
-                "IT": ".MI",  # 이탈리아 밀라노
-                "CA": ".TO",  # 캐나다 토론토
-                "AU": ".AX",  # 호주 시드니
-                "IN": ".NS",  # 인도 국립 증권거래소
-                "US": ""      # 미국 (기본값)
-            }
+            if not h.empty:
+                # 국가 분류 로직만 정교하게
+                if ".KS" in sym or ".KQ" in sym: cat = "KR"
+                elif ".T" in sym: cat = "JP"
+                elif ".HK" in sym: cat = "HK"
+                elif any(x in sym for x in [".L", ".DE", ".PA"]): cat = "EU"
+                else: cat = "US"
+
+                high_120 = h['High'].tail(120).max()
+                heat = (float(h['Close'].iloc[-1]) / high_120) * 100
+                market_heats[cat].append(heat)
+        except Exception as e:
+            continue
+
+    # 이후 온도계 출력...
             
             # 엑셀 티커 끝에 국가 식별자가 붙어있는 경우 처리
             if s.endswith('L'): return s.replace('L', '.L')
