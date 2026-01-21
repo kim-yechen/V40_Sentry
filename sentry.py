@@ -7,73 +7,63 @@ import time
 import requests
 
 def run_v40_absolute_global_14():
-    # [V40 원칙: Full Process Compliance] - 데이터 처리 전 엑셀 파일 존재 여부 엄격 확인
-    # 1+1-1=Complete: 로직+데이터+저장을 하나의 단위로 실행
+    # [V40 원칙] 1+1-1=Complete: 로직+데이터+저장을 하나로
     files = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")
     if not files: 
         print("❌ 엑셀 파일이 없습니다. 형님, 원본 리스트를 확인하십시오.")
         return
+        
     target_file = files[0]
 
     try:
-        # [데이터 로딩 단계] 시트별 독립적 읽기 수행으로 데이터 무결성 확보
+        # 1. 엑셀 로딩 (형님이 말씀하신 시트들 확인)
         xls = pd.ExcelFile(target_file)
-        df_a = pd.read_excel(xls, sheet_name=1) 
-        df_b = pd.read_excel(xls, sheet_name=2) 
+        # 마스터 데이터는 'Full_Spectrum'에서 가져옴
+        df_master = pd.read_excel(xls, sheet_name='Full_Spectrum')
         
-        # [14개국 전선 강제 박제 엔진 - 아시아 티커 복원 버전]
-        def run_v40_fixed():
-    # 여기서부터 정확히 스페이스 4칸입니다.
-    target_files = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")
-    if not target_files:
-        print("❌ 파일을 찾을 수 없습니다.")
-        return
-    
-    target = target_files[0]
-    xls = pd.ExcelFile(target)
-    
-    # 2. 'Full_Spectrum' 시트 직접 타격
-    df_master = pd.read_excel(xls, sheet_name='Full_Spectrum')
-    
-    # 3. 엑셀 티커 그대로 추출
-    all_syms = [str(s).strip().upper() for s in df_master['Symbol'].dropna().unique()]
-    
-    print(f"✅ 확인 완료: {len(all_syms)}개 종목 분석 시작")
+        # 2. 형님이 세팅한 티커 그대로 추출 (보정 없이 그대로 사용)
+        all_syms = [str(s).strip().upper() for s in df_master['Symbol'].dropna().unique()]
+        print(f"✅ 확인 완료: {len(all_syms)}개 종목 분석 시작")
 
-    market_heats = {"KR": [], "US": [], "JP": [], "HK": [], "EU": []}
+        market_heats = {"KR": [], "US": [], "JP": [], "HK": [], "EU": []}
 
-    for sym in all_syms:
-        try:
-            # 4. 티커 그대로 야후에 던짐
-            t_obj = yf.Ticker(sym)
-            h = t_obj.history(period="250d")
-            
-            if not h.empty:
-                # 국가 분류
-                if ".KS" in sym or ".KQ" in sym: cat = "KR"
-                elif ".T" in sym: cat = "JP"
-                elif ".HK" in sym: cat = "HK"
-                elif any(x in sym for x in [".L", ".DE", ".PA"]): cat = "EU"
-                else: cat = "US"
+        # 3. 데이터 수집 엔진
+        for sym in all_syms:
+            try:
+                # 엑셀 티커 그대로 야후에 던짐
+                t_obj = yf.Ticker(sym)
+                h = t_obj.history(period="250d")
+                
+                if not h.empty:
+                    # 국가 분류 로직 (이미 엑셀에 점미사가 있으므로 포함 여부로 판단)
+                    if ".KS" in sym or ".KQ" in sym: cat = "KR"
+                    elif ".T" in sym: cat = "JP"
+                    elif ".HK" in sym: cat = "HK"
+                    elif any(x in sym for x in [".L", ".DE", ".PA", ".AS", ".MI"]): cat = "EU"
+                    else: cat = "US"
 
-                high_120 = h['High'].tail(120).max()
-                heat = (float(h['Close'].iloc[-1]) / high_120) * 100
-                market_heats[cat].append(heat)
-        except:
-            continue
-    
-    # 온도계 결과 출력 (들여쓰기 주의)
-    for k, v in market_heats.items():
-        if v:
-            avg_heat = sum(v) / len(v)
-            print(f"📡 {k} 시장 온도: {avg_heat:.2f}%")
-            
-            # 엑셀 티커 끝에 국가 식별자가 붙어있는 경우 처리
-            if s.endswith('L'): return s.replace('L', '.L')
-            if s.endswith('DE'): return s.replace('DE', '.DE')
-            if s.endswith('PA'): return s.replace('PA', '.PA')
-            
-            return s # 매핑되지 않으면 미국 시장으로 간주
+                    # 온도계 계산 (120일 고점 대비 현재가)
+                    high_120 = h['High'].tail(120).max()
+                    current_price = float(h['Close'].iloc[-1])
+                    heat = (current_price / high_120) * 100
+                    market_heats[cat].append(heat)
+                    
+                time.sleep(0.1) # 과부하 방지
+            except:
+                continue
+        
+        # 4. 온도계 결과 리포팅
+        print("\n" + "="*40)
+        print(f"📊 {datetime.now().strftime('%Y-%m-%d %H:%M')} 시장 온도 리포트")
+        print("-" * 40)
+        for k, v in market_heats.items():
+            if v:
+                avg_heat = sum(v) / len(v)
+                print(f"📡 {k} 시장 온도: {avg_heat:.2f}% (종목수: {len(v)})")
+        print("="*40)
+
+    except Exception as e:
+        print(f"❌ 실행 중 오류 발생: {e}")
 
         # 전체 종목 리스트 통합 및 중복 제거
         all_syms = pd.concat([df_a['Symbol'], df_b['Symbol']]).dropna().unique()
