@@ -100,7 +100,7 @@ def run_v40_absolute_global_14():
                 is_turnaround = False
                 try:
                     tk = yf.Ticker(sym)
-fin = tk.income_stmt
+                    fin = tk.income_stmt
                     if not fin.empty and 'Net Income' in fin.index:
                         ni = fin.loc['Net Income'].dropna()
                         if len(ni) >= 2:
@@ -169,5 +169,5 @@ fin = tk.income_stmt
     except Exception as e:
         print(f"🛑 시발 에러 발생: {e}. 로직 밀도 재검토 및 즉시 수정하겠습니다.")
 
-if name == "main":
+if __name__ == "__main__":
     run_v40_absolute_global_14()
