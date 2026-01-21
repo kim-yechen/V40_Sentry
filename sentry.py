@@ -23,7 +23,7 @@ def run_v40_absolute_global_14():
         
         # [14개국 전선 강제 박제 엔진 - 아시아 티커 복원 버전]
         def run_v40_fixed():
-    # 1. 파일 찾기 (들여쓰기 4칸 확인 완료)
+    # 여기서부터 정확히 스페이스 4칸입니다.
     target_files = glob.glob("*V40_NEW_HUMAN_V2_UPGRADE*.xlsx")
     if not target_files:
         print("❌ 파일을 찾을 수 없습니다.")
@@ -35,7 +35,7 @@ def run_v40_absolute_global_14():
     # 2. 'Full_Spectrum' 시트 직접 타격
     df_master = pd.read_excel(xls, sheet_name='Full_Spectrum')
     
-    # 3. 엑셀 티커 그대로 추출 (보정 없이 그대로 사용)
+    # 3. 엑셀 티커 그대로 추출
     all_syms = [str(s).strip().upper() for s in df_master['Symbol'].dropna().unique()]
     
     print(f"✅ 확인 완료: {len(all_syms)}개 종목 분석 시작")
@@ -61,8 +61,12 @@ def run_v40_absolute_global_14():
                 market_heats[cat].append(heat)
         except:
             continue
-
-    # 이후 온도계 출력...
+    
+    # 온도계 결과 출력 (들여쓰기 주의)
+    for k, v in market_heats.items():
+        if v:
+            avg_heat = sum(v) / len(v)
+            print(f"📡 {k} 시장 온도: {avg_heat:.2f}%")
             
             # 엑셀 티커 끝에 국가 식별자가 붙어있는 경우 처리
             if s.endswith('L'): return s.replace('L', '.L')
