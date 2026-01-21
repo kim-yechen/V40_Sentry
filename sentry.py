@@ -65,9 +65,26 @@ def run_v40_absolute_global_14():
     except Exception as e:
         print(f"❌ 실행 중 오류 발생: {e}")
 
-        # 전체 종목 리스트 통합 및 중복 제거
-        all_syms = pd.concat([df_a['Symbol'], df_b['Symbol']]).dropna().unique()
-        all_syms = [get_global_ticker(s) for s in all_syms]
+        # 2. 직접 티커 보정 로직 (get_global_ticker 함수 대신 사용)
+        all_syms_raw = df_master['Symbol'].dropna().unique()
+        all_syms = []
+        for s in all_syms_raw:
+            s = str(s).strip().upper()
+            if s.endswith('L') and '.' not in s: s = s[:-1] + '.L'
+            elif s.endswith('DE') and '.' not in s: s = s[:-2] + '.DE'
+            elif s.endswith('PA') and '.' not in s: s = s[:-2] + '.PA'
+            all_syms.append(s)
+        
+
+        # 전체 종목 리스트 통합 및 직접 보정
+        all_syms_raw = pd.concat([df_a['Symbol'], df_b['Symbol']]).dropna().unique()
+        all_syms = []
+        for s in all_syms_raw:
+            s = str(s).strip().upper()
+            if s.endswith('L') and '.' not in s: s = s[:-1] + '.L'
+            elif s.endswith('DE') and '.' not in s: s = s[:-2] + '.DE'
+            elif s.endswith('PA') and '.' not in s: s = s[:-2] + '.PA'
+            all_syms.append(s)
         
         print(f"🌍 14개국 {len(all_syms)}개 종목 전선 실시간 데이터 집행 및 돌파 시작...")
 
