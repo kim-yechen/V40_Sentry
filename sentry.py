@@ -139,14 +139,23 @@ def run_v40_dual_layer_strategy():
                 })
                 print(f"   >> 🚀 발견: {sym} (가속도: {accel:.2f})", end="\r")
         except: continue
-            
-# ==============================================================================
-    # 💾 [V40 하이브리드 보고 로직] 평일: 텍스트 요약 / 토요일: 텍스트 + 엑셀 파일
-    # ==============================================================================
-    
-    # 1. 메시지 구성 (평일/주말 공통)
-    msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f])
-    msg_2 = "\n".join([f"🚀 {r['Symbol']} | 가속:{r['Accel_Score']}" for _, r in df_2.head(5).iterrows()])
+            except Exception:
+            continue
+                
+    # --------------------------------------------------------------------------
+    # 여기서부터는 for 문 밖입니다 (모든 종목 검사 완료 후)
+    # --------------------------------------------------------------------------
+
+    # 1. 데이터프레임 생성 (에러 방지용)
+    df_1 = pd.DataFrame(results_1f)
+    df_2 = pd.DataFrame(results_2f)
+    if not df_2.empty:
+        df_2 = df_2.sort_values(by='Accel_Score', ascending=False)
+
+    # 2. 메시지 구성 (평일/주말 공통)
+    msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f]) if results_1f else "보유 종목 없음"
+    # df_2.head(5)를 사용하여 상위 5개만 메시지에 포함
+    msg_2 = "\n".join([f"🚀 {r['Symbol']} | 가속:{r['Accel_Score']}" for _, r in df_2.head(5).iterrows()]) if not df_2.empty else "조건 충족 없음"
     
     final_msg = (f"👹 [V40 데일리 감시]\n\n"
                  f"{heat_msg}\n\n"
@@ -154,7 +163,7 @@ def run_v40_dual_layer_strategy():
                  f"🧬 [2층: 신규 괴물 TOP 5]\n{msg_2}\n\n"
                  f"💡 평일에는 '생존'만 확인하십시오. 전략은 주말에 짭니다.")
 
-    # 2. 요일 확인 (5가 토요일)
+    # 3. 요일 확인 (5가 토요일)
     is_weekend = (datetime.now().weekday() == 5)
 
     try:
@@ -166,8 +175,8 @@ def run_v40_dual_layer_strategy():
         if is_weekend:
             save_name = f"V40_Weekly_DeepScan_{datetime.now().strftime('%m%d')}.xlsx"
             with pd.ExcelWriter(save_name, engine='openpyxl') as writer:
-                pd.DataFrame(results_1f).to_excel(writer, sheet_name='1층_보유점검', index=False)
-                pd.DataFrame(results_2f).to_excel(writer, sheet_name='2층_신규발굴', index=False)
+                df_1.to_excel(writer, sheet_name='1층_보유점검', index=False)
+                df_2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
             
             with open(save_name, 'rb') as f:
                 requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendDocument", 
@@ -177,8 +186,8 @@ def run_v40_dual_layer_strategy():
             print("📲 평일 요약 보고 완료.")
 
     except Exception as e:
-        print(f"❌ 보고 중 오류: {e}")
+        print(f"❌ 보고 중 오류 발생: {e}")
 
-# (이 아래는 원래 있던 그대로 두시면 됩니다)
+# (이 부분은 파일의 가장 끝, 들여쓰기 없음)
 if __name__ == "__main__":
     run_v40_dual_layer_strategy()
