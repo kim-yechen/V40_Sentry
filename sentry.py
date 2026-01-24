@@ -139,20 +139,28 @@ def run_v40_dual_layer_strategy():
                 })
                 print(f"   >> 🚀 발견: {sym} (가속도: {accel:.2f})", end="\r")
         except: continue
-
-    # ==============================================================================
-    # 💾 저장 및 보고
-    # ==============================================================================
-    # 1. 엑셀 저장 (시트 분리)
-    df_1 = pd.DataFrame(results_1f)
-    df_2 = pd.DataFrame(results_2f).sort_values(by='Accel_Score', ascending=False).head(20)
-    
+            
+# [수정된 최종 저장/보고 섹션]
     save_name = f"V40_DUAL_REPORT_{datetime.now().strftime('%m%d_%H%M')}.xlsx"
     with pd.ExcelWriter(save_name) as writer:
         df_1.to_excel(writer, sheet_name='1층_보유점검', index=False)
         df_2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
-        
-    print(f"\n\n💾 [저장 완료] {save_name}")
+    
+    print(f"💾 [Local 저장 완료] {save_name}")
+
+    # 📲 텔레그램 메시지 발송
+    requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendMessage", 
+                  json={"chat_id": CHAT_ID, "text": final_msg})
+
+    # 📎 텔레그램 파일 발송 (형님이 밖에서 열어보실 수 있게!)
+    try:
+        with open(save_name, 'rb') as f:
+            requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendDocument", 
+                          data={'chat_id': CHAT_ID}, 
+                          files={'document': f})
+        print("📡 형님, 엑셀 파일까지 텔레그램으로 쏴드렸습니다!")
+    except Exception as e:
+        print(f"❌ 파일 전송 실패: {e}")
 
     # 2. 텔레그램 전송
     msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f])
