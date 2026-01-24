@@ -1,17 +1,12 @@
-name: V40 Daily Sentry
+name: V40 Hybrid Sentry (Daily Msg + Weekly File)
+
 on:
   schedule:
-    # 1. 아시아 세션 (한국, 일본, 홍콩) 마감 보고
-    # 한국시간 월~금 오후 5:30 (UTC 08:30)
-    # 월요일 장 마감 결과가 월요일 오후에 즉시 날아옵니다.
-    - cron: '30 08 * * 1-5'
-
-    # 2. 미국/유럽 세션 마감 보고 (기존 유지)
-    # 한국시간 화~토 오전 7:30 (UTC 22:30)
-    # 미국 월요일 장 결과는 화요일 아침에 보고됩니다.
+    # 한국시간 화~토 오전 07:30 (UTC 월~금 22:30)
+    # 미국 월~금 장 마감 직후에 실행됩니다.
     - cron: '30 22 * * 1-5'
 
-  workflow_dispatch:
+  workflow_dispatch: # 필요할 때 수동 실행 가능
   push:
     branches: [ main ]
 
