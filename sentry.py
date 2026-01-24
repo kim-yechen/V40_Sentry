@@ -141,8 +141,9 @@ def run_v40_dual_layer_strategy():
         except: continue
             except Exception:
             continue
+
                 
-    # --------------------------------------------------------------------------
+      # --------------------------------------------------------------------------
     # 여기서부터는 for 문 밖입니다 (모든 종목 검사 완료 후)
     # --------------------------------------------------------------------------
 
@@ -154,7 +155,6 @@ def run_v40_dual_layer_strategy():
 
     # 2. 메시지 구성 (평일/주말 공통)
     msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f]) if results_1f else "보유 종목 없음"
-    # df_2.head(5)를 사용하여 상위 5개만 메시지에 포함
     msg_2 = "\n".join([f"🚀 {r['Symbol']} | 가속:{r['Accel_Score']}" for _, r in df_2.head(5).iterrows()]) if not df_2.empty else "조건 충족 없음"
     
     final_msg = (f"👹 [V40 데일리 감시]\n\n"
@@ -175,8 +175,15 @@ def run_v40_dual_layer_strategy():
         if is_weekend:
             save_name = f"V40_Weekly_DeepScan_{datetime.now().strftime('%m%d')}.xlsx"
             with pd.ExcelWriter(save_name, engine='openpyxl') as writer:
-                df_1.to_excel(writer, sheet_name='1층_보유점검', index=False)
-                df_2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
+                if not df_1.empty:
+                    df_1.to_excel(writer, sheet_name='1층_보유점검', index=False)
+                else:
+                    pd.DataFrame({'결과': ['데이터 없음']}).to_excel(writer, sheet_name='1층_보유점검', index=False)
+                
+                if not df_2.empty:
+                    df_2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
+                else:
+                    pd.DataFrame({'결과': ['조건 충족 없음']}).to_excel(writer, sheet_name='2층_신규발굴', index=False)
             
             with open(save_name, 'rb') as f:
                 requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendDocument", 
@@ -188,6 +195,6 @@ def run_v40_dual_layer_strategy():
     except Exception as e:
         print(f"❌ 보고 중 오류 발생: {e}")
 
-# (이 부분은 파일의 가장 끝, 들여쓰기 없음)
+# (이 부분은 들여쓰기 없이 왼쪽 벽에 붙이십시오)
 if __name__ == "__main__":
     run_v40_dual_layer_strategy()
