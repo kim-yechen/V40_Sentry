@@ -141,54 +141,43 @@ def run_v40_dual_layer_strategy():
         except: continue
             
 # ==============================================================================
-    # 💾 [최종 진압 로격] 데이터 정리 -> 메시지 생성 -> 저장 -> 텔레그램 발송
+    # 💾 [V40 하이브리드 보고 로직] 평일: 텍스트 요약 / 토요일: 텍스트 + 엑셀 파일
     # ==============================================================================
     
-    # 1. 보고용 데이터프레임 정리
-    df_1 = pd.DataFrame(results_1f)
-    df_2 = pd.DataFrame(results_2f)
-    if not df_2.empty:
-        df_2 = df_2.sort_values(by='Accel_Score', ascending=False).head(20)
-
-    # 2. 텔레그램 텍스트 메시지 먼저 생성 (순서 중요!)
-    msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f]) if results_1f else "보유 데이터 없음"
-    msg_2 = "\n".join([f"🚀 {r['Symbol']} | 가속:{r['Accel_Score']}" for _, r in df_2.head(5).iterrows()]) if not df_2.empty else "조건 충족 없음"
+    # 1. 메시지 구성 (평일/주말 공통)
+    msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f])
+    msg_2 = "\n".join([f"🚀 {r['Symbol']} | 가속:{r['Accel_Score']}" for _, r in df_2.head(5).iterrows()])
     
-    final_msg = (f"👹 [V40 듀얼 리포트]\n\n"
+    final_msg = (f"👹 [V40 데일리 감시]\n\n"
                  f"{heat_msg}\n\n"
-                 f"🏢 [1층: 내 종목 점검]\n{msg_1}\n\n"
-                 f"🧬 [2층: 신규 괴물 TOP 5]\n{msg_2}")
+                 f"🏢 [1층: 내 종목 생존여부]\n{msg_1}\n\n"
+                 f"🧬 [2층: 신규 괴물 TOP 5]\n{msg_2}\n\n"
+                 f"💡 평일에는 '생존'만 확인하십시오. 전략은 주말에 짭니다.")
 
-    # 3. 엑셀 파일 저장 (에러 방지 로직 포함)
-    save_name = f"V40_DUAL_REPORT_{datetime.now().strftime('%m%d_%H%M')}.xlsx"
-    try:
-        with pd.ExcelWriter(save_name, engine='openpyxl') as writer:
-            if not df_1.empty:
-                df_1.to_excel(writer, sheet_name='1층_보유점검', index=False)
-            else:
-                pd.DataFrame({'결과': ['데이터 없음']}).to_excel(writer, sheet_name='1층_보유점검', index=False)
-            
-            if not df_2.empty:
-                df_2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
-            else:
-                pd.DataFrame({'결과': ['조건 충족 없음']}).to_excel(writer, sheet_name='2층_신규발굴', index=False)
-        print(f"💾 [1단계] 로컬 저장 완료: {save_name}")
-    except Exception as e:
-        print(f"❌ 엑셀 저장 실패: {e}")
+    # 2. 요일 확인 (5가 토요일)
+    is_weekend = (datetime.now().weekday() == 5)
 
-    # 4. 텔레그램 최종 발송 (텍스트 보고 + 파일 전송)
     try:
-        # 텍스트 전송
+        # 공통: 텔레그램 텍스트 발송
         requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendMessage", 
-                      json={"chat_id": CHAT_ID, "text": final_msg}, timeout=10)
-        
-        # 파일 전송
-        with open(save_name, 'rb') as f:
-            requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendDocument", 
-                          data={'chat_id': CHAT_ID}, files={'document': f}, timeout=15)
-        print("🎯 [2단계] 텔레그램 보고 및 파일 전송 완료.")
+                      json={"chat_id": CHAT_ID, "text": final_msg})
+
+        # 토요일에만 파일 생성 및 발송
+        if is_weekend:
+            save_name = f"V40_Weekly_DeepScan_{datetime.now().strftime('%m%d')}.xlsx"
+            with pd.ExcelWriter(save_name, engine='openpyxl') as writer:
+                pd.DataFrame(results_1f).to_excel(writer, sheet_name='1층_보유점검', index=False)
+                pd.DataFrame(results_2f).to_excel(writer, sheet_name='2층_신규발굴', index=False)
+            
+            with open(save_name, 'rb') as f:
+                requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendDocument", 
+                              data={'chat_id': CHAT_ID}, files={'document': f})
+            print("📡 토요일 정밀 분석 파일 발송 완료.")
+        else:
+            print("📲 평일 요약 보고 완료.")
+
     except Exception as e:
-        print(f"❌ 텔레그램 전송 중 모순 발생: {e}")
+        print(f"❌ 보고 중 오류: {e}")
 
 # (이 아래는 원래 있던 그대로 두시면 됩니다)
 if __name__ == "__main__":
