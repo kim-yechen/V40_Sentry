@@ -2,11 +2,11 @@ name: V40 Hybrid Sentry (Daily Msg + Weekly File)
 
 on:
   schedule:
-    # 한국시간 화~토 오전 07:30 (UTC 월~금 22:30)
-    # 미국 월~금 장 마감 직후에 실행됩니다.
-    - cron: '30 22 * * 1-5'
+    # 0(일)요일부터 5(목)요일까지 UTC 22:30에 실행
+    # -> 한국시간(KST) 기준 월, 화, 수, 목, 금, 토 오전 07:30 실행
+    - cron: '30 22 * * 0-5'
 
-  workflow_dispatch: # 필요할 때 수동 실행 가능
+  workflow_dispatch:
   push:
     branches: [ main ]
 
