@@ -20,7 +20,7 @@ def run_v40_dual_layer_strategy():
     CHAT_ID = "198757117"
 
     # 1. 타겟 설정
-    my_portfolio = ['FCX', 'SCCO', 'SLV', 'IORT', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
+    my_portfolio = ['FCX', 'SCCO', 'SIVR', 'IORT', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
     
     files = [f for f in glob.glob("*.*") if "V40" in f.upper() and f.endswith(('.csv', '.xlsx'))]
     if not files: 
