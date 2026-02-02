@@ -137,11 +137,16 @@ def run_v40_dual_layer_strategy():
             msg_2_list.append(f"🚀 {r['Symbol']} | 펄스:{r['Real_Pulse']}% {r['Risk_Tag']}")
     msg_2 = "\n".join(msg_2_list) if msg_2_list else "조건 충족 없음"
     
-    final_msg = (f"👹 [V40 늑대 감시]\n\n{heat_msg}\n\n"
-                 f"🏢 [1층: 보유주]\n{msg_1}\n\n"
-                 f"🧬 [2층: 급등 펄스]\n{msg_2}\n\n"
-                 f"💡 (❌과열) 태그가 뜬 종목은 설거지 위험이 높으니 쳐다보지 마십시오.")
+    # [수정안: V7/V8 스펙트럼 적용]
+    v7_p, v8_p, market_state = get_quantum_spectrum() # V8 파일 읽는 함수 (위에서 드린 코드)
 
+    final_msg = (f"👹 [V40 퀀텀 관제센터]\n\n"
+                 f"📊 [시장 스펙트럼 판정]\n"
+                 f"🔴 V7(상승파동): {v7_p:.1f}%\n"  # SPY 온도 대신 이게 들어가야 함
+                 f"🔵 V8(붕괴파동): {v8_p:.1f}%\n"
+                 f"📢 판정: {market_state}\n\n"
+                 f"🏢 [1층: 보유주 대응]\n{msg_1}\n\n" # msg_1도 V8 비중에 따라 동적으로 생성
+                 f"🧬 [2층: 신규 사냥터]\n{msg_2}")
     # 토요일(5) 아침에만 엑셀 파일 전송 (미국 금요일 장 마감 보고)
     is_weekend = (datetime.now().weekday() == 5)
 
