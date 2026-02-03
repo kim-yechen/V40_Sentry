@@ -65,44 +65,36 @@ class QuantumControlCenter:
         return True
 
     def calculate_macro_spectrum(self):
-        """[V40 무결성+쏠림보정] 0.58을 58점으로 대접하고 쏠림장세를 감지하는 로직"""
+        """[V40 무결성+쏠림보정] 데이터 원본을 존중하며 쏠림을 감지하는 최종 엔진"""
         print("🔎 1단계: 시장 파동 관측 및 '쏠림형 강세' 정밀 진단 중...")
         try:
-            # 1. 형님이 신뢰하시는 데이터 2개 로드
+            # 1. 파일 로드 (형님이 주신 핵심 파일 2개)
             v7_df = self._smart_file_loader("KIM_DIRECTOR_V7_HYBRID_FINAL.xlsx")
             v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx")
             
-            # 2. 마지막 데이터 추출
-            v7_energy = v7_df['V_Energy'].iloc[-1]           # 약 713
-            v8_cash_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 약 0.58 (58%)
+            # 2. 마지막 행 데이터 추출 (원값 유지)
+            v7_raw = v7_df['V_Energy'].iloc[-1]           # 약 713
+            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 약 0.58
             
-            # 3. [체급 동기화] 0.58을 58점으로 변환하여 V7(713)과 싸울 수 있게 만듦
-            v8_score = v8_cash_raw * 100 
-            v8_final = v8_score + (self.macro_v8_switch * 5) # 스위치 반영
-            
-            # 4. [쏠림형 강세 감지] 형님 계좌 -11%의 원인을 잡는 핵심 로직
-            # 지수는 높은데(V7 > 500) 리스크 경고(V8 > 50)가 동시에 뜨면 '기형적 쏠림'으로 판단
-            if v7_energy > 500 and v8_score > 50:
-                self.market_state = "🚨 [⚠️쏠림형 강세] 대형주 독식 / 중소형주 피빨림 장세"
-                # 쏠림장에서는 V8(방패)의 가중치를 1.5배 강제 펌핑하여 형님 자산 보호
-                v8_final = v8_final * 1.5 
-            
-            # 5. 파동 붕괴 시뮬레이션 (최종 비중 계산)
-            if v8_final > 60:
-                collapse_factor = np.exp(-(v8_final - 60) / 10)
-                v7_effective = v7_energy * collapse_factor
+            # 3. [V40 담백한 판정] 데이터 조작 없이 '원값'으로 시장 성격 규명
+            if v8_raw > 0.5: # 0.5(50%) 이상이면 리세션/쏠림 신호로 간주
+                self.market_state = "🚨 [⚠️쏠림형 강세] 대형주 독식 / 개별주 피빨림"
+                # 붕괴 상황이므로 V7 에너지의 영향력을 20% 수준으로 강제 감쇄 (자연스러운 붕괴)
+                v7_effective = v7_raw * 0.2
             else:
-                v7_effective = v7_energy
+                v7_effective = v7_raw
+                self.market_state = "🔥 V7 정상 파동 (적극 공략)"
 
-            total = v7_effective + v8_final
-            self.v7_p = (v7_effective / total) * 100
-            self.v8_p = (v8_final / total) * 100
+            # 4. 최종 표시용 비중 계산 (0.58을 58점으로 환산하여 % 계산)
+            v8_score = v8_raw * 100
+            total = v7_effective + v8_score
             
-            # 6. 최종 상태 메시지 보정
-            if self.v8_p > 70:
-                self.market_state += " | 💀 파동 붕괴 (현금 100% 권장)"
-            elif self.v8_p > 50:
-                self.market_state += " | ⚖️ 보수적 대응 구간"
+            self.v7_p = (v7_effective / total) * 100
+            self.v8_p = (v8_score / total) * 100
+            
+            # 5. [추가] 최종 붕괴 확인
+            if self.v8_p > 60:
+                self.market_state += " | 💀 파동 붕괴 확정"
             
             return True
         except Exception as e:
