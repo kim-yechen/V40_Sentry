@@ -65,36 +65,44 @@ class QuantumControlCenter:
         return True
 
     def calculate_macro_spectrum(self):
-        """[V40 무결성 복구] V7 에너지와 V8 현금비중의 체급 동기화"""
+        """[V40 무결성+쏠림보정] 0.58을 58점으로 대접하고 쏠림장세를 감지하는 로직"""
+        print("🔎 1단계: 시장 파동 관측 및 '쏠림형 강세' 정밀 진단 중...")
         try:
-            # 1. 형님이 지정하신 정확한 파일 2개 로드
+            # 1. 형님이 신뢰하시는 데이터 2개 로드
             v7_df = self._smart_file_loader("KIM_DIRECTOR_V7_HYBRID_FINAL.xlsx")
             v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx")
             
             # 2. 마지막 데이터 추출
-            v7_energy = v7_df['V_Energy'].iloc[-1]           # 약 713.77
-            v8_cash_ratio = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 약 0.58
+            v7_energy = v7_df['V_Energy'].iloc[-1]           # 약 713
+            v8_cash_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 약 0.58 (58%)
             
-            # 3. [핵심 보정] 0.58을 58점으로 변환 (V7 에너지 체급에 맞춤)
-            # V7 에너지가 700대이므로, V8도 그에 걸맞는 파괴력을 갖게 비중을 재설정합니다.
-            v8_final_score = v8_cash_ratio * 100 # 0.58 -> 58.0
+            # 3. [체급 동기화] 0.58을 58점으로 변환하여 V7(713)과 싸울 수 있게 만듦
+            v8_score = v8_cash_raw * 100 
+            v8_final = v8_score + (self.macro_v8_switch * 5) # 스위치 반영
             
-            # 4. 파동 붕괴 로직 (현금 비중이 50%가 넘으면 V7 에너지를 급격히 깎음)
-            v8_total = v8_final_score + (self.macro_v8_switch * 5)
+            # 4. [쏠림형 강세 감지] 형님 계좌 -11%의 원인을 잡는 핵심 로직
+            # 지수는 높은데(V7 > 500) 리스크 경고(V8 > 50)가 동시에 뜨면 '기형적 쏠림'으로 판단
+            if v7_energy > 500 and v8_score > 50:
+                self.market_state = "🚨 [⚠️쏠림형 강세] 대형주 독식 / 중소형주 피빨림 장세"
+                # 쏠림장에서는 V8(방패)의 가중치를 1.5배 강제 펌핑하여 형님 자산 보호
+                v8_final = v8_final * 1.5 
             
-            if v8_total > 50:
-                # 붕괴 계수 적용: V8 압력이 높을수록 V7 상승 에너지는 소멸함
-                collapse_factor = np.exp(-(v8_total - 50) / 15)
+            # 5. 파동 붕괴 시뮬레이션 (최종 비중 계산)
+            if v8_final > 60:
+                collapse_factor = np.exp(-(v8_final - 60) / 10)
                 v7_effective = v7_energy * collapse_factor
-                self.market_state = "💀 [파동 붕괴] 하락 압력이 에너지를 압도함"
             else:
                 v7_effective = v7_energy
-                self.market_state = "🔥 [정상 파동] 상승 에너지 우세"
 
-            # 5. 최종 퍼센트 계산
-            total = v7_effective + v8_total
+            total = v7_effective + v8_final
             self.v7_p = (v7_effective / total) * 100
-            self.v8_p = (v8_total / total) * 100
+            self.v8_p = (v8_final / total) * 100
+            
+            # 6. 최종 상태 메시지 보정
+            if self.v8_p > 70:
+                self.market_state += " | 💀 파동 붕괴 (현금 100% 권장)"
+            elif self.v8_p > 50:
+                self.market_state += " | ⚖️ 보수적 대응 구간"
             
             return True
         except Exception as e:
