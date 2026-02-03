@@ -33,8 +33,8 @@ class QuantumControlCenter:
         """V7(상승) vs V8(붕괴) 스펙트럼 산출 (+)"""
         print("🔎 1단계: 매크로 스펙트럼 분석 중...")
         try:
-            v7_df = pd.read_csv("V7_RESULT_BNAI_FINAL.xlsx - Sheet1.csv")
-            v8_df = pd.read_csv("KIM_DIRECTOR_V8_UPDATED.xlsx - Sheet1.csv")
+            v7_df = pd.read_csv("V7_RESULT_BNAI_FINAL.xlsx")
+            v8_df = pd.read_csv("KIM_DIRECTOR_V8_UPDATED.xlsx")
             
             # 마지막 데이터 포인트 추출
             v7_e = v7_df['V_Energy'].iloc[-1]
