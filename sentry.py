@@ -1,139 +1,137 @@
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import glob
-import os
 import requests
+import os
 from datetime import datetime
 import warnings
 
-# [V40 원칙: 기계적 무결성]
+# [V40 원칙: 기계적 무결성 및 지름길 금지]
 warnings.filterwarnings('ignore')
 
-# ---------------------------------------------------------
-# [신규 추가] V8 스펙트럼 분석 함수 (안 되던 부분)
-# ---------------------------------------------------------
-def get_quantum_spectrum():
-    v8_file = "KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx"
-    try:
-        if v8_file.endswith('.csv'):
-            df_v8 = pd.read_csv(v8_file)
-        else:
-            df_v8 = pd.read_excel(v8_file)
-            
-        latest = df_v8.iloc[-1]
-        v8_p = float(latest['Recommended_Cash_Ratio'])
-        v7_p = 100.0 - v8_p
-        
-        if v8_p >= 60: state = "🥶 V8 빙하기 (현금확보)"
-        elif v8_p >= 35: state = "☁️ 경계 구간 (선별접근)"
-        else: state = "🔥 V7 불장 (풀매수)"
-        return v7_p, v8_p, state
-    except Exception as e:
-        print(f"⚠️ V8 파일 분석 실패(중립 판정): {e}")
-        return 50.0, 50.0, "⚖️ 중립 (데이터 연결 확인 필요)"
+class QuantumControlCenter:
+    def __init__(self, macro_v8_switch=0):
+        self.macro_v8_switch = macro_v8_switch # 형님이 입력하는 비상 V8 가중치
+        self.report_data = []
+        self.v7_p = 50.0
+        self.v8_p = 50.0
+        self.market_state = "⚖️ 초기화 중"
+        self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
+        self.chat_id = "198757117"
 
-def run_v40_dual_layer_strategy():
-    print(f"👹 [V40-Dynamic-Pulse] 늑대 엔진 가동... {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("----------------------------------------------------------------")
+    def negative_check(self, value, name):
+        """[원칙 2] 데이터 커먼센스 체크: 음수나 비논리적 수치 차단"""
+        if value < 0 or value > 1000000000: # 비정상적 수치
+            raise ValueError(f"❌ {name} 데이터 오류: {value} (논리적 한계를 벗어남)")
 
-    # 1. 스펙트럼 측정 (파동 붕괴)
-    v7_p, v8_p, market_state = get_quantum_spectrum()
-
-    # 0. 텔레그램 설정
-    T_TOKEN = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
-    CHAT_ID = "198757117"
-
-    # 1. 타겟 설정 (잘되던 부분 유지)
-    my_portfolio = ['FCX', 'SCCO', 'SIVR', 'IORT', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
-    files = [f for f in glob.glob("*.*") if "V40" in f.upper() and f.endswith(('.csv', '.xlsx'))]
-    if not files: 
-        print("❌ V40 종목 파일이 없습니다."); return
-    
-    try:
-        target_file = files[0]
-        df_raw = pd.read_csv(target_file) if target_file.endswith('.csv') else pd.read_excel(target_file)
-        df_raw.columns = [c.upper().strip() for c in df_raw.columns]
-        us_candidates = df_raw['SYMBOL'].unique() if 'SYMBOL' in df_raw.columns else df_raw['TICKER'].unique()
-        new_candidates = [x for x in us_candidates if x not in my_portfolio]
-    except Exception as e: 
-        print(f"❌ 파일 로드 에러: {e}"); return
-
-    # 🏢 [1층] 보유 종목 진단 (V8 수치에 따른 동적 변환 적용)
-    print("\n🏢 [1층] 보유 종목 생존 판결 중...")
-    results_1f = []
-    # V8 위험도에 따라 익절 기준(이격도)을 타이트하게 조절
-    # V8이 0일 때 70%, V8이 50일 때 45%에서 익절 신호 발생
-    dynamic_limit = 0.7 - (v8_p * 0.005) 
-
-    for sym in my_portfolio:
+    def calculate_spectrum(self):
+        """V7(상승) vs V8(붕괴) 스펙트럼 산출 (+)"""
         try:
+            v7_df = pd.read_csv("V7_RESULT_BNAI_FINAL.xlsx - Sheet1.csv")
+            v8_df = pd.read_csv("KIM_DIRECTOR_V8_UPDATED.xlsx - Sheet1.csv")
+            
+            v7_e = v7_df['V_Energy'].iloc[-1]
+            v8_r = v8_df['Recommended_Cash_Ratio'].iloc[-1]
+            
+            # 데이터 검증 (Negative Check)
+            self.negative_check(v8_r, "V8 Cash Ratio")
+            
+            # 매크로 스위치 반영 (형님의 직관 주입)
+            v8_final = v8_r + (self.macro_v8_switch * 5) # 스위치당 5%씩 위험도 가중
+            
+            total = v7_e + v8_final
+            self.v7_p = (v7_e / total) * 100
+            self.v8_p = (v8_final / total) * 100
+            
+            if self.v8_p > 65: self.market_state = "🥶 V8 붕괴파동 지배"
+            elif self.v7_p > 65: self.market_state = "🔥 V7 상승파동 지배"
+            else: self.market_state = "⚖️ 중립 (데이터 연결 확인 필요)"
+            
+        except Exception as e:
+            print(f"🚨 [로직오류] 스펙트럼 산출 불가: {e}")
+            raise
+
+    def floor_1_portfolio(self):
+        """1층: 보유주 생존 판결 (V7/V8 비율에 따른 동적 대응) (+)"""
+        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
+        results = []
+        
+        # V8(위험)이 높을수록 익절/손절 기준을 0.7에서 0.2까지 수축시킴 (안면몰수 전략)
+        dynamic_limit = max(0.2, 0.7 - (self.v8_p * 0.006))
+        
+        for sym in portfolio:
             tk = yf.Ticker(sym)
             df = tk.history(period="1y")
             if df.empty: continue
             
             curr = df['Close'].iloc[-1]
             ma120 = df['Close'].rolling(120).mean().iloc[-1]
-            ma200 = df['Close'].rolling(200).mean().iloc[-1]
-            gap_120 = (curr / ma120) - 1
-
-            if curr > ma120:
-                if gap_120 > dynamic_limit:
-                    action, icon = f"🚨 과열(비중 {int(v8_p)}% 축소)", "🔥"
-                else:
-                    action, icon = "💎 강력 홀딩", "🟢"
-            elif curr > ma200:
-                action, icon = "⚠️ 비중 축소", "🟡"
-            else:
-                action, icon = "🚨 전량 매도", "🔴"
-
-            results_1f.append({'Symbol': sym, 'Action': action, 'Status_Icon': icon})
-        except: continue
-
-    # 🧬 [2층] 신규 괴물 사냥 (잘되던 펄스 로직 유지)
-    print("\n🧬 [2층] '설거지 방지' 펄스 스캔 중...")
-    results_2f = []
-    target_pool = new_candidates[:300] # 속도를 위해 300개로 제한
-    
-    for sym in target_pool:
-        try:
-            df = yf.Ticker(str(sym)).history(period="6mo")
-            if len(df) < 20: continue 
-            curr = df['Close'].iloc[-1]
-            ma20 = df['Close'].rolling(20).mean().iloc[-1]
-            pulse_10d = (curr / df['Close'].iloc[-10]) - 1
-            disparity = (curr / ma20) - 1
             
-            if pulse_10d > 0.1:
-                risk_tag = ""
-                score = pulse_10d * 100
-                if disparity > 0.3:
-                    risk_tag = "(❌과열)"
-                    score *= 0.1 
-                
-                results_2f.append({'Symbol': sym, 'Accel_Score': score, 'Pulse': pulse_10d*100, 'Tag': risk_tag})
-        except: continue
+            # 강제 손절 원칙: 평단가 데이터 부재 시 120일선 이탈을 '자살 방지선'으로 설정
+            if curr < ma120:
+                action, icon = "🚨 전량 매도 (생존 본능)", "🔴"
+            elif (curr / ma120 - 1) > dynamic_limit:
+                action, icon = f"🔥 과열(비중 {int(self.v8_p)}% 축소)", "🚨"
+            else:
+                action, icon = "💎 강력 홀딩", "🟢"
+            
+            results.append(f"{icon} {sym}: {action}")
+        return "\n".join(results)
 
-    # 💾 [저장 및 메시지 구성]
-    df_2 = pd.DataFrame(results_2f).sort_values(by='Accel_Score', ascending=False) if results_2f else pd.DataFrame()
-    
-    msg_1 = "\n".join([f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}" for r in results_1f])
-    
-    # 2층 필터링: V8이 높으면 아예 추천을 줄임
-    top_n = 3 if v8_p > 40 else 5
-    msg_2 = "\n".join([f"🚀 {r['Symbol']} | 펄스:{r['Pulse']:.1f}% {r['Tag']}" for _, r in df_2.head(top_n).iterrows()])
+    def floor_2_hunting(self):
+        """2층: 신규 사냥터 (V7C 원자재 + V40 리포트 교차 분석) (+)"""
+        try:
+            v7c = pd.read_csv("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx - Sheet1.csv")
+            v40_target = pd.read_csv("V40_BEST_TARGETS.xlsx - Sheet1.csv")
+            v40_ten = pd.read_csv("V40_TEN_BAGGER_REPORT_0837.xlsx - Sheet1.csv")
+            
+            # V7C 에너지가 높은 원자재주와 V40 리스트의 교집합 추출
+            v7c_top = v7c[v7c['Grade'].str.contains('A|B')].sort_values(by='V_Energy', ascending=False)
+            
+            # V7 우세 시: 텐배거 리포트에서 공격적 종목
+            if self.v7_p > self.v8_p:
+                hunt_list = v40_ten[v40_ten['Status'].str.contains('Buy')].head(3)
+                msg = "\n".join([f"🚀 {r['Symbol']} | 펄스:{r['Q_Score']:.1f}" for _, r in hunt_list.iterrows()])
+            # V8 우세 시: 원자재 방어주(V7C) 중심
+            else:
+                hunt_list = v7c_top.head(3)
+                msg = "\n".join([f"⛏️ {r['Symbol']} | 원자재 에너지:{r['V_Energy']}" for _, r in hunt_list.iterrows()])
+            
+            return msg
+        except Exception as e:
+            return f"🧬 사냥터 분석 오류: {e}"
 
-    # [수정된 템플릿] 관성적인 SPY 온도계를 버리고 스펙트럼 주입
-    final_msg = (f"👹 [V40 퀀텀 관제센터]\n\n"
-                 f"📊 [시장 스펙트럼 판정]\n"
-                 f"🔴 V7(상승파동): {v7_p:.1f}%\n"
-                 f"🔵 V8(붕괴파동): {v8_p:.1f}%\n"
-                 f"📢 판정: {market_state}\n\n"
-                 f"🏢 [1층: 보유주 대응]\n{msg_1}\n\n"
-                 f"🧬 [2층: 신규 사냥터]\n{msg_2}")
-
-    # 발송 로직
-    requests.post(f"https://api.telegram.org/bot{T_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": final_msg})
+    def run_process(self):
+        """[원칙 1] 전 과정 준수: 분석 -> 처리 -> 저장 -> 보고 (=)"""
+        try:
+            self.calculate_spectrum()
+            f1_msg = self.floor_1_portfolio()
+            f2_msg = self.floor_2_hunting()
+            
+            # 결과 저장 (엑셀 파일 생성)
+            report_df = pd.DataFrame([{"V7": self.v7_p, "V8": self.v8_p, "State": self.market_state}])
+            file_name = f"V40_FINAL_REPORT_{datetime.now().strftime('%m%d_%H%M')}.xlsx"
+            report_df.to_excel(file_name)
+            
+            # 최종 메시지 구성
+            final_msg = (f"👹 [V40 퀀텀 관제센터]\n\n"
+                         f"📊 [시장 스펙트럼 판정]\n"
+                         f"🔴 V7(상승파동): {self.v7_p:.1f}%\n"
+                         f"🔵 V8(붕괴파동): {self.v8_p:.1f}%\n"
+                         f"📢 판정: {self.market_state}\n\n"
+                         f"🏢 [1층: 보유주 대응]\n{f1_msg}\n\n"
+                         f"🧬 [2층: 신규 사냥터]\n{f2_msg}")
+            
+            # 텔레그램 발송
+            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
+                          json={"chat_id": self.chat_id, "text": final_msg})
+            
+            print(f"✅ 프로세스 완료: {file_name} 저장 및 보고 완료")
+            
+        except Exception as e:
+            print(f"❌ 프로세스 중단 (지름길 금지): {e}")
 
 if __name__ == "__main__":
-    run_v40_dual_layer_strategy()
+    # 매크로 스위치 (0~10): 유동성 축소 등 위험 시 숫자를 높여 V8 가중치 부여
+    engine = QuantumControlCenter(macro_v8_switch=2)
+    engine.run_process()
