@@ -68,8 +68,8 @@ class QuantumControlCenter:
         """1단계: 파동붕괴(Wave Function Collapse) 알고리즘 적용"""
         print("🔎 1단계: 시장 파동 관측 및 붕괴 여부 계산 중...")
         try:
-            v7_df = self._smart_file_loader("V7_RESULT_BNAI_FINAL.xlsx")
-            v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_UPDATED.xlsx")
+            v7_df = self._smart_file_loader("KIM_DIRECTOR_V7_HYBRID_FINAL.xlsx")
+            v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx")
             
             # 데이터 오염 검사
             self.negative_check(v7_df, 'V_Energy')
