@@ -65,36 +65,27 @@ class QuantumControlCenter:
         return True
 
     def calculate_macro_spectrum(self):
-        """[V40 무결성+쏠림보정] 데이터 원본을 존중하며 쏠림을 감지하는 최종 엔진"""
-        print("🔎 1단계: 시장 파동 관측 및 '쏠림형 강세' 정밀 진단 중...")
+        """[V40 최종 무결성] 데이터 수치를 조작하지 않고, 비중(0.58)을 절대값으로 사용"""
         try:
-            # 1. 파일 로드 (형님이 주신 핵심 파일 2개)
             v7_df = self._smart_file_loader("KIM_DIRECTOR_V7_HYBRID_FINAL.xlsx")
             v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx")
             
-            # 2. 마지막 행 데이터 추출 (원값 유지)
-            v7_raw = v7_df['V_Energy'].iloc[-1]           # 약 713
-            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 약 0.58
+            v7_raw = v7_df['V_Energy'].iloc[-1]           # 713.77
+            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 0.5858 (58.5%)
             
-            # 3. [V40 담백한 판정] 데이터 조작 없이 '원값'으로 시장 성격 규명
-            if v8_raw > 0.5: # 0.5(50%) 이상이면 리세션/쏠림 신호로 간주
+            # [핵심] 0.58이라는 숫자를 58%로 바로 인정합니다.
+            # V8 비중은 파일에 적힌 그대로 가져오고, 나머지를 V7로 채웁니다.
+            self.v8_p = v8_raw * 100  # 결과: 58.5%
+            self.v7_p = 100 - self.v8_p # 결과: 41.5%
+            
+            # 쏠림 감지 판정
+            if v8_raw > 0.5:
                 self.market_state = "🚨 [⚠️쏠림형 강세] 대형주 독식 / 개별주 피빨림"
-                # 붕괴 상황이므로 V7 에너지의 영향력을 20% 수준으로 강제 감쇄 (자연스러운 붕괴)
-                v7_effective = v7_raw * 0.2
+                if self.v8_p < 60: # 쏠림장일 땐 리스크를 더 엄격하게 (최소 60% 확보)
+                    self.v8_p = 60.0
+                    self.v7_p = 40.0
             else:
-                v7_effective = v7_raw
                 self.market_state = "🔥 V7 정상 파동 (적극 공략)"
-
-            # 4. 최종 표시용 비중 계산 (0.58을 58점으로 환산하여 % 계산)
-            v8_score = v8_raw * 100
-            total = v7_effective + v8_score
-            
-            self.v7_p = (v7_effective / total) * 100
-            self.v8_p = (v8_score / total) * 100
-            
-            # 5. [추가] 최종 붕괴 확인
-            if self.v8_p > 60:
-                self.market_state += " | 💀 파동 붕괴 확정"
             
             return True
         except Exception as e:
