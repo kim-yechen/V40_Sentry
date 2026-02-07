@@ -1,15 +1,12 @@
-name: V40 Hybrid Sentry (Daily Msg + Weekly File)
+name: V40 Hybrid Sentry (Pure Telegram Only)
 
 on:
   schedule:
+    # 한국시간(KST) 월~토 오전 07:30 실행
     - cron: '30 22 * * 0-5'
   workflow_dispatch:
   push:
     branches: [ main ]
-
-# 1. 쓰기 권한 추가 (파일 저장을 위해 필수)
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -31,20 +28,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
+          # 1. 여기서 엑셀을 만들고 
+          # 2. 파이썬 코드 안의 로직이 텔레그램으로 파일을 쏩니다.
+          # 3. 작업이 끝나면 가상 컴퓨터는 모든 파일을 삭제하고 종료됩니다.
           python sentry.py
-
-      # 2. 생성된 엑셀 파일을 GitHub 서버에 보관 (Artifact)
-      - name: Upload Excel Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: V40_Weekly_Reports
-          path: "*.xlsx" # 모든 엑셀 파일을 보관함
-
-      # 3. 변경된 파일을 저장소(Repo)에 자동으로 푸시하여 폴더에 남기기
-      - name: Commit and Push changes
-        run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add .
-          git commit -m "📊 [자동업데이트] 관제 리포트 생성 완료" || echo "No changes to commit"
-          git push
