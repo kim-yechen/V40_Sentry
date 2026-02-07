@@ -2,29 +2,49 @@ name: V40 Hybrid Sentry (Daily Msg + Weekly File)
 
 on:
   schedule:
-    # 0(일)요일부터 5(목)요일까지 UTC 22:30에 실행
-    # -> 한국시간(KST) 기준 월, 화, 수, 목, 금, 토 오전 07:30 실행
     - cron: '30 22 * * 0-5'
-
   workflow_dispatch:
   push:
     branches: [ main ]
+
+# 1. 쓰기 권한 추가 (파일 저장을 위해 필수)
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install Dependencies
         run: |
           pip install yfinance pandas requests openpyxl
+
       - name: Run Sentry Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python sentry.py
+
+      # 2. 생성된 엑셀 파일을 GitHub 서버에 보관 (Artifact)
+      - name: Upload Excel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: V40_Weekly_Reports
+          path: "*.xlsx" # 모든 엑셀 파일을 보관함
+
+      # 3. 변경된 파일을 저장소(Repo)에 자동으로 푸시하여 폴더에 남기기
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add .
+          git commit -m "📊 [자동업데이트] 관제 리포트 생성 완료" || echo "No changes to commit"
+          git push
