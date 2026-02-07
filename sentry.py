@@ -155,40 +155,117 @@ class QuantumControlCenter:
         except Exception as e:
             return f"🧬 2층 분석 오류: {e}"
 
+    # [추가] 전임자 스타일 데이터 추출 엔진 (1층용)
+    def _get_floor_1_data(self):
+        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
+        data_list = []
+        try:
+            df_all = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
+            for sym in portfolio:
+                df = df_all[sym]
+                if df.empty: continue
+                
+                curr = df['Close'].iloc[-1]
+                ma120 = df['Close'].rolling(120).mean().iloc[-1]
+                gap_120 = ((curr / ma120) - 1) * 100 # 120일선 이격도
+                
+                # 상태 아이콘 결정
+                if curr < ma120: status, icon = "매도", "💀"
+                elif gap_120 > 70: status, icon = "과열", "🔥"
+                else: status, icon = "홀딩", "🟢"
+                
+                data_list.append({
+                    "Symbol": sym,
+                    "Price": round(curr, 2),
+                    "Action": f"{icon} {status}",
+                    "Status_Icon": icon,
+                    "Gap_120": round(gap_120, 1)
+                })
+            return pd.DataFrame(data_list)
+        except:
+            return pd.DataFrame()
+
+    # [추가] 전임자 스타일 데이터 추출 엔진 (2층용)
+    def _get_floor_2_data(self):
+        try:
+            # 2층 타겟 파일들 로드
+            v7c = self._smart_file_loader("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx")
+            best = self._smart_file_loader("V40_BEST_TARGETS.xlsx")
+            
+            # 필요한 컬럼만 추려서 통합 (전임자 포맷 준수)
+            # 파일마다 컬럼명이 다를 수 있어 표준화 작업
+            targets = []
+            
+            # V7C 데이터 가공
+            if not v7c.empty:
+                temp = v7c[['Symbol', 'Price', 'V_Energy', 'Grade']].head(5).copy()
+                temp.columns = ['Symbol', 'Price', 'Accel_Score', 'Risk_Tag']
+                targets.append(temp)
+                
+            # Best Targets 데이터 가공
+            if not best.empty:
+                temp2 = best[['Ticker', 'Price', 'V_Energy']].head(5).copy()
+                temp2.columns = ['Symbol', 'Price', 'Accel_Score']
+                temp2['Risk_Tag'] = "BEST"
+                targets.append(temp2)
+            
+            return pd.concat(targets) if targets else pd.DataFrame()
+        except:
+            return pd.DataFrame()
+
     def run_process(self):
-        """[원칙 1] 전 과정 준수: 분석 -> 검증 -> 저장 -> 보고"""
+        """[원칙 1] 전 과정 준수: 분석 -> 시트별 데이터 생성 -> 저장 -> 보고"""
         if not self.calculate_macro_spectrum(): return
         
+        # 1. 텍스트 리포트 생성 (데일리용)
         f1_report = self.floor_1_action()
         f2_report = self.floor_2_hunting()
         
         self.analysis_report = (f"👹 [V40 퀀텀 관제센터: Hybrid]\n\n"
                                 f"📊 [파동 관측]\n"
-                                f"🔴 V7(에너지): {self.v7_p:.1f}% | 🔵 V8(붕괴압력): {self.v8_p:.1f}%\n"
+                                f"🔴 V7: {self.v7_p:.1f}% | 🔵 V8: {self.v8_p:.1f}%\n"
                                 f"📢 상태: {self.market_state}\n\n"
-                                f"🏢 [1층: 트레일링 스탑]\n{f1_report}\n\n"
-                                f"🧬 [2층: 타겟 스캐닝]\n{f2_report}")
+                                f"🏢 [1층 보유점검]\n{f1_report}\n\n"
+                                f"🧬 [2층 신규발굴]\n{f2_report}")
 
-        # [저장] 1+1-1=Complete (보고 전 저장)
-        file_name = f"V40_QUANTUM_LOG_{datetime.now().strftime('%m%d_%H%M')}.xlsx"
-        pd.DataFrame([{"Content": self.analysis_report}]).to_excel(file_name, index=False)
+        # 2. [핵심] 엑셀 파일 생성 (전임자 스타일: 시트 분리)
+        # 토요일(5)이거나 테스트를 위해 파일은 항상 생성
+        file_name = f"V40_Weekly_Wolf_{datetime.now().strftime('%m%d')}.xlsx"
         
-        # [보고] 텔레그램 발송 (수정 구간)
         try:
-            # 1. 공통: 매일 아침 텍스트 리포트 발송
+            # 1층, 2층 데이터프레임 가져오기
+            df_f1 = self._get_floor_1_data()
+            df_f2 = self._get_floor_2_data()
+            
+            with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
+                # 시트1: 1층_보유점검
+                if not df_f1.empty:
+                    df_f1.to_excel(writer, sheet_name='1층_보유점검', index=False)
+                # 시트2: 2층_신규발굴
+                if not df_f2.empty:
+                    df_f2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
+                # 시트3: 요약 (텍스트)
+                pd.DataFrame([{"Report": self.analysis_report}]).to_excel(writer, sheet_name='종합리포트', index=False)
+                
+            print(f"✅ 엑셀 생성 완료: {file_name} (시트 분리됨)")
+            
+        except Exception as e:
+            print(f"❌ 엑셀 생성 실패: {e}")
+
+        # 3. [보고] 텔레그램 발송
+        try:
+            # (1) 데일리 텍스트 발송
             requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
                           json={"chat_id": self.chat_id, "text": self.analysis_report}, timeout=15)
 
-            # 2. 추가: 토요일(5)인 경우에만 엑셀 파일 추가 발송
-            # datetime.now().weekday() 가 5이면 토요일입니다.
+            # (2) 토요일(5) 주간 리포트 파일 발송
             if datetime.now().weekday() == 5:
                 doc_url = f"https://api.telegram.org/bot{self.t_token}/sendDocument"
-                with open(file_name, 'rb') as f:
-                    requests.post(doc_url, data={'chat_id': self.chat_id, 'caption': "📅 V40 주간 통합 리포트(Excel)"}, 
-                                  files={'document': f}, timeout=30)
-                print(f"✅ 토요일 주간 파일 발송 완료: {file_name}")
-
-            print(f"✅ 데일리 보고 완료.")
+                if os.path.exists(file_name):
+                    with open(file_name, 'rb') as f:
+                        requests.post(doc_url, data={'chat_id': self.chat_id, 'caption': "📅 V40 주간 통합 리포트(원본)"}, 
+                                      files={'document': f}, timeout=30)
+                    print(f"✅ 토요일 주간 파일 발송 완료")
             
         except Exception as e:
             print(f"❌ 통신 오류: {e}")
