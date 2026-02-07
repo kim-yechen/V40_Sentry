@@ -173,14 +173,23 @@ class QuantumControlCenter:
         file_name = f"V40_QUANTUM_LOG_{datetime.now().strftime('%m%d_%H%M')}.xlsx"
         pd.DataFrame([{"Content": self.analysis_report}]).to_excel(file_name, index=False)
         
-        # [보고] 텔레그램 발송
+        # [보고] 텔레그램 발송 (수정 구간)
         try:
-            res = requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                                json={"chat_id": self.chat_id, "text": self.analysis_report}, timeout=15)
-            if res.status_code == 200:
-                print(f"✅ 보고 완료: {file_name} 저장됨.")
-            else:
-                print(f"❌ 발송 실패: {res.status_code}")
+            # 1. 공통: 매일 아침 텍스트 리포트 발송
+            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
+                          json={"chat_id": self.chat_id, "text": self.analysis_report}, timeout=15)
+
+            # 2. 추가: 토요일(5)인 경우에만 엑셀 파일 추가 발송
+            # datetime.now().weekday() 가 5이면 토요일입니다.
+            if datetime.now().weekday() == 5:
+                doc_url = f"https://api.telegram.org/bot{self.t_token}/sendDocument"
+                with open(file_name, 'rb') as f:
+                    requests.post(doc_url, data={'chat_id': self.chat_id, 'caption': "📅 V40 주간 통합 리포트(Excel)"}, 
+                                  files={'document': f}, timeout=30)
+                print(f"✅ 토요일 주간 파일 발송 완료: {file_name}")
+
+            print(f"✅ 데일리 보고 완료.")
+            
         except Exception as e:
             print(f"❌ 통신 오류: {e}")
 
