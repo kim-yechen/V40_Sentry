@@ -156,77 +156,83 @@ class QuantumControlCenter:
             return f"🧬 2층 분석 오류: {e}"
 
     # [추가] 전임자 스타일 데이터 추출 엔진 (1층용)
-    def _get_floor_2_data(self):
-        """2층: 텍스트 리포트와 100% 동기화 (V7C, BEST, TEN_BAGGER 통합)"""
-        combined = []
+    # --- 1층 엔진: AttributeError 해결 및 데이터 복구 ---
+    def _get_floor_1_data(self):
+        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
+        data_list = []
         try:
-            # 1. 파일 3종 세트 로딩 (텍스트 로직과 동일하게)
-            v7c = self._smart_file_loader("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx")
-            best = self._smart_file_loader("V40_BEST_TARGETS.xlsx")
-            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837.xlsx")
-            
-            # 2. V7C (Mining Shield) 추출
-            if not v7c.empty:
-                t1 = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].head(3).copy()
-                t1 = t1[['Symbol', 'Price', 'V_Energy']].rename(columns={'V_Energy': 'Accel_Score'})
-                t1['Risk_Tag'] = '🛡️ Shield'
-                combined.append(t1)
-            
-            # 3. BEST Targets 추출
-            if not best.empty:
-                t2 = best.sort_values(by='V_Energy', ascending=False).head(3).copy()
-                t2 = t2[['Ticker', 'Price', 'V_Energy']].rename(columns={'Ticker': 'Symbol', 'V_Energy': 'Accel_Score'})
-                t2['Risk_Tag'] = '🎯 BEST'
-                combined.append(t2)
+            # 원칙 2 적용: yfinance 데이터 직접 추출
+            data = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
+            for sym in portfolio:
+                df = data[sym]
+                if df.empty: continue
+                curr = df['Close'].iloc[-1]
+                ma120 = df['Close'].rolling(120).mean().iloc[-1]
+                gap = ((curr/ma120)-1)*100
+                # 전임자 판정 아이콘 및 로직
+                if curr < ma120: act, icon = "🔴 [전량매도] 120일선 붕괴", "💀"
+                elif gap > 60: act, icon = "🚨 과열권 (비중 축소)", "🔥"
+                else: act, icon = "🟢 강력 홀딩", "💎"
+                data_list.append({"Symbol": sym, "Price": round(curr, 2), "Action": act, "Status_Icon": icon, "Gap_120": round(gap, 1)})
+            return pd.DataFrame(data_list)
+        except:
+            return pd.DataFrame(columns=["Symbol", "Price", "Action", "Status_Icon", "Gap_120"])
 
-            # 4. TEN_BAGGER (이게 누락되어 빈칸이었던 주범입니다)
-            if not v40_ten.empty:
-                t3 = v40_ten[v40_ten['Status'].str.contains('Buy', na=False)].head(5).copy()
-                # 텐배거 파일은 컬럼명이 다를 수 있으므로 안전하게 처리
-                cols = {'Symbol': 'Symbol', 'Q_Score': 'Accel_Score', 'Price': 'Price'}
-                t3 = t3[[c for c in cols.keys() if c in t3.columns]].rename(columns=cols)
-                t3['Risk_Tag'] = '🚀 TEN-B'
-                combined.append(t3)
+    # --- 2층 엔진: 텐배거 파일 누락 해결 및 텍스트와 100% 동기화 ---
+    def _get_floor_2_data(self):
+        combined = []
+        # 텍스트 리포트에서 사용하는 3개 파일을 동일하게 스캔
+        targets = [
+            ("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx", "🛡️ Shield"),
+            ("V40_BEST_TARGETS.xlsx", "🎯 BEST"),
+            ("V40_TEN_BAGGER_REPORT_0837.xlsx", "🚀 TEN-B")
+        ]
+        
+        for file_name, tag in targets:
+            df = self._smart_file_loader(file_name)
+            if not df.empty:
+                # 텐배거 파일(Symbol, Q_Score)과 BEST파일(Ticker, V_Energy) 컬럼 통합
+                temp = df.copy()
+                if 'Ticker' in temp.columns: temp = temp.rename(columns={'Ticker': 'Symbol'})
+                if 'V_Energy' in temp.columns: temp = temp.rename(columns={'V_Energy': 'Accel_Score'})
+                if 'Q_Score' in temp.columns: temp = temp.rename(columns={'Q_Score': 'Accel_Score'})
+                
+                # 필수 컬럼만 추출하여 병합
+                cols = [c for c in ['Symbol', 'Price', 'Accel_Score'] if c in temp.columns]
+                subset = temp[cols].head(5)
+                subset['Risk_Tag'] = tag
+                combined.append(subset)
+        
+        if combined:
+            res = pd.concat(combined, ignore_index=True)
+            res['Real_Pulse'] = res['Accel_Score'] * 10 # 전임자 포맷 복구
+            return res
+        return pd.DataFrame(columns=["Symbol", "Price", "Accel_Score", "Real_Pulse", "Risk_Tag"])
 
-            if not combined:
-                # 데이터가 하나도 없으면 전임자 양식이라도 유지
-                return pd.DataFrame(columns=["Symbol", "Price", "Accel_Score", "Risk_Tag"])
-            
-            df_final = pd.concat(combined, ignore_index=True)
-            # 0131 파일 스타일로 Real_Pulse 컬럼(보조지표) 강제 생성
-            df_final['Real_Pulse'] = df_final['Accel_Score'] * 10 
-            return df_final
-            
-        except Exception as e:
-            print(f"⚠️ 2층 데이터 수집 중 엔진 과부하: {e}")
-            return pd.DataFrame(columns=["Symbol", "Price", "Accel_Score", "Real_Pulse", "Risk_Tag"])
-
+    # --- 실행부: 저장 및 보고 통합 ---
     def run_process(self):
-        """[V40 무결성 공정] 데이터 생성 -> 시트 분리 저장 -> 텔레그램 발송"""
         if not self.calculate_macro_spectrum(): return
         
-        # 1. 데이터 준비 (1층, 2층, 종합리포트)
+        # [원칙 1] 데이터 생성 후 저장
         df_f1 = self._get_floor_1_data()
-        df_f2 = self._get_floor_2_data() # 이제 꽉 차서 나옵니다
+        df_f2 = self._get_floor_2_data()
         
-        f1_msg = self.floor_1_action()
-        f2_msg = self.floor_2_hunting()
-        self.analysis_report = (f"👹 [V40 퀀텀 관제센터: Hybrid]\n\n"
-                                f"📊 [파동 관측]\n"
-                                f"🔴 V7: {self.v7_p:.1f}% | 🔵 V8: {self.v8_p:.1f}%\n"
-                                f"📢 상태: {self.market_state}\n\n"
-                                f"🏢 [1층 보유점검]\n{f1_msg}\n\n"
-                                f"🧬 [2층 신규발굴]\n{f2_msg}")
+        # 리포트 텍스트 생성 (엑셀 시트와 내용 동일)
+        report_text = f"👹 [V40 퀀텀 관제센터]\n\n📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n\n🏢 [1층]\n"
+        for _, r in df_f1.iterrows(): report_text += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}\n"
+        report_text += f"\n🧬 [2층]\n"
+        for _, r in df_f2.head(10).iterrows(): report_text += f"{r['Risk_Tag']} {r['Symbol']} | Q:{r['Accel_Score']}\n"
 
-        # 2. 엑셀 파일 물리적 저장
         file_name = f"V40_Weekly_Wolf_{datetime.now().strftime('%m%d')}.xlsx"
-        report_rows = [{"V40_REPORT_SUMMARY": line} for line in self.analysis_report.split('\n')]
-        df_summary = pd.DataFrame(report_rows)
+        df_summary = pd.DataFrame([{"V40_SUMMARY": line} for line in report_text.split('\n')])
 
+        # 엑셀 물리적 저장 (시트 3개 분리)
         with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
             df_f1.to_excel(writer, sheet_name='1층_보유점검', index=False)
             df_f2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
             df_summary.to_excel(writer, sheet_name='종합리포트', index=False)
+
+        # 텔레그램 발송 로직 (생략 - 기존 사용)
 
         # 3. 보고 체계 가동
         try:
