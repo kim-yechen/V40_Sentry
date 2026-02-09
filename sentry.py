@@ -209,42 +209,64 @@ class QuantumControlCenter:
             return res
         return pd.DataFrame(columns=["Symbol", "Price", "Accel_Score", "Real_Pulse", "Risk_Tag"])
 
-    # --- 실행부: 저장 및 보고 통합 ---
     def run_process(self):
-        if not self.calculate_macro_spectrum(): return
+        # 1. [시간 설정] 한국 시간(KST) 및 요일 판정
+        from datetime import datetime, timedelta
+        kst_now = datetime.utcnow() + timedelta(hours=9)
+        weekday = kst_now.weekday()  # 0:월, 5:토
         
-        # [원칙 1] 데이터 생성 후 저장
+        # 2. [제목 결정] 요일별 리포트 타이틀 분기
+        if weekday == 0:
+            title = "📅 [V40 주초 개장상황 보고]"
+        elif weekday == 5:
+            title = "📊 [V40 주간 결산 보고]"
+        else:
+            title = "👹 [V40 일일 관제 보고]"
+
+        # 3. [데이터 처리] 매크로 분석 및 1, 2층 데이터 수집
+        if not self.calculate_macro_spectrum(): 
+            return # 분석 실패 시 중단 (원칙 2: 네거티브 체크)
+            
         df_f1 = self._get_floor_1_data()
         df_f2 = self._get_floor_2_data()
+
+        # 4. [리포트 생성] 텍스트 구성 (self.analysis_report로 통일)
+        self.analysis_report = f"{title}\n\n📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
+        self.analysis_report += f"📢 상태: {self.market_state}\n\n🏢 [1층]\n"
         
-        # 리포트 텍스트 생성 (엑셀 시트와 내용 동일)
-        report_text = f"👹 [V40 퀀텀 관제센터]\n\n📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n\n🏢 [1층]\n"
-        for _, r in df_f1.iterrows(): report_text += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']}\n"
-        report_text += f"\n🧬 [2층]\n"
-        for _, r in df_f2.head(10).iterrows(): report_text += f"{r['Risk_Tag']} {r['Symbol']} | Q:{r['Accel_Score']}\n"
+        for _, r in df_f1.iterrows():
+            self.analysis_report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
+        
+        self.analysis_report += f"\n🧬 [2층]\n"
+        if not df_f2.empty:
+            for _, r in df_f2.head(10).iterrows():
+                # Risk_Tag와 Accel_Score가 있는지 확인 후 안전하게 추출
+                tag = r.get('Risk_Tag', '🚀')
+                score = r.get('Accel_Score', 0)
+                self.analysis_report += f"{tag} {r['Symbol']} | Q:{score}\n"
+        else:
+            self.analysis_report += "⚠️ 2층 데이터 로딩 실패\n"
 
-        file_name = f"V40_Weekly_Wolf_{datetime.now().strftime('%m%d')}.xlsx"
-        df_summary = pd.DataFrame([{"V40_SUMMARY": line} for line in report_text.split('\n')])
-
-        # 엑셀 물리적 저장 (시트 3개 분리)
+        # 5. [파일 저장] 원칙 1: 보고 전 반드시 엑셀 파일 생성 및 저장
+        file_name = f"V40_Weekly_Wolf_{kst_now.strftime('%m%d')}.xlsx"
+        df_summary = pd.DataFrame([{"V40_SUMMARY": line} for line in self.analysis_report.split('\n')])
+        
         with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
             df_f1.to_excel(writer, sheet_name='1층_보유점검', index=False)
             df_f2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
             df_summary.to_excel(writer, sheet_name='종합리포트', index=False)
 
-        # 텔레그램 발송 로직 (생략 - 기존 사용)
-
-        # 3. 보고 체계 가동
+        # 6. [최종 보고] 텔레그램 발송
         try:
-            # 텍스트는 매일 발송
+            # (1) 텍스트 리포트 발송 (매일)
             requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
                           json={"chat_id": self.chat_id, "text": self.analysis_report})
 
-            # 토요일엔 '진짜 엑셀' 발송
-            if datetime.now().weekday() == 5:
+            # (2) 토요일(5) 아침에만 '만들어둔 엑셀' 발송
+            if weekday == 5:
                 with open(file_name, 'rb') as f:
                     requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
-                                  data={'chat_id': self.chat_id, 'caption': f"📊 {file_name} 데이터 정합성 검증 완료"}, 
+                                  data={'chat_id': self.chat_id, 'caption': "📊 주간 데이터 정합성 검증 완료"}, 
                                   files={'document': f})
         except Exception as e:
             print(f"❌ 보고 체계 장애: {e}")
