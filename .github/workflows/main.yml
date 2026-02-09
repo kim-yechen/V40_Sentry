@@ -2,7 +2,7 @@ name: V40 Hybrid Sentry (Pure Telegram Only)
 
 on:
   schedule:
-    # 한국시간(KST) 월~토 오전 07:30 실행
+    # UTC 22:30 (KST 07:30) | 일~금 실행 -> 한국 시간 월~토 아침 보고
     - cron: '30 22 * * 0-5'
   workflow_dispatch:
   push:
@@ -13,22 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: Install Dependencies
-        run: |
-          pip install yfinance pandas requests openpyxl
-
+        run: pip install yfinance pandas requests openpyxl
       - name: Run Sentry Engine
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: |
-          # 1. 여기서 엑셀을 만들고 
-          # 2. 파이썬 코드 안의 로직이 텔레그램으로 파일을 쏩니다.
-          # 3. 작업이 끝나면 가상 컴퓨터는 모든 파일을 삭제하고 종료됩니다.
-          python sentry.py
+        run: python sentry.py
