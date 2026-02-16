@@ -90,48 +90,58 @@ class QuantumControlCenter:
     def calculate_macro_spectrum(self):
         """
         1단계: 매크로 스펙트럼 분석
-        - NBI(바이오) + NG100(넥스트젠) 지수를 반영하여 V7, V8의 파동 계산
+        - 지수 호출은 10초 컷! 하지만 파일 분석은 0.1%까지 정밀하게 수행.
         """
-        print("🔭 [Step 1] 매크로 정찰병 투입...")
+        print("🔭 [Step 1] 매크로 정찰병 투입 (지수 호출 최대 10초 대기)...")
+        self.indices_report = "🧬 NBI: 수신 실패(파일 데이터 기준)\n🚀 NGX: 수신 실패(파일 데이터 기준)" # 기본값
+        
         try:
-            # 데이터 로드
+            # --- [Part A: 파일 데이터 정밀 분석] ---
+            # 지수 호출 실패해도 이 부분은 절대 대충 넘기지 않습니다.
             v7_df = self._smart_file_loader("V7_RESULT_BNAI_FINAL")
             v8_df = self._smart_file_loader("V8_REVISION_FINAL")
             
-            # 컬럼명 유연성 확보 (형님의 원본 데이터 컬럼명 매칭)
             v8_col = 'Recommended_Cash_Ratio' if 'Recommended_Cash_Ratio' in v8_df.columns else 'V8_NextGen_Cash'
             v8_raw = v8_df[v8_col].iloc[-1]
             
-            # [원칙 2] 현금 비중 검증
+            # [원칙 2] 현금 비중 검증 (기계적 에러 차단)
             self.negative_check(v8_raw, "V8_RAW_DATA", min_limit=0)
             
-            # 퍼센트 변환
+            # 파동 계산
             self.v8_p = v8_raw * 100 if v8_raw <= 1.0 else v8_raw
             self.v7_p = 100 - self.v8_p 
 
-            # [수정] 지수 호출 및 변수 저장 확실하게!
-        try:
-            sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False)['Close']
-            if not sentinels.empty and len(sentinels) >= 2:
-                nbi_v = sentinels['^NBI'].iloc[-1]
-                ngx_v = sentinels['^NGX'].iloc[-1]
-                nbi_c = (nbi_v / sentinels['^NBI'].iloc[-2] - 1) * 100
-                ngx_c = (ngx_v / sentinels['^NGX'].iloc[-2] - 1) * 100
+            # --- [Part B: 실시간 지수 호출 (타임아웃 10초)] ---
+            try:
+                # timeout=10으로 4분 동안 멍 때리는 현상 방어
+                sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False, timeout=10)['Close']
                 
-                # 리포트에서 쓸 변수명을 'indices_report'로 통일
-                self.indices_report = f"🧬 NBI: {nbi_v:,.2f} ({nbi_c:+.1f}%)\n🚀 NGX: {ngx_v:,.2f} ({ngx_c:+.1f}%)"
-            else:
-                self.indices_report = "🧬 NBI: 데이터 수신 대기\n🚀 NGX: 데이터 수신 대기"
-        except Exception as e:
-            self.indices_report = "🧬 NBI: 연결 지연(확인요망)\n🚀 NGX: 연결 지연(확인요망)"
-                
-                # 가산점 적용 후 다시 무결성 체크
-                self.v8_p = max(5.0, min(95.0, self.v8_p))
-                self.v7_p = 100 - self.v8_p
-            except:
-                print("⚠️ 실시간 지수 호출 지연 - 기본 파일 데이터로 진행")
+                if not sentinels.empty and len(sentinels) >= 2:
+                    nbi_v = sentinels['^NBI'].iloc[-1]
+                    ngx_v = sentinels['^NGX'].iloc[-1]
+                    
+                    # 전일 대비 등락률 계산 및 nan 방어
+                    nbi_c = ((nbi_v / sentinels['^NBI'].iloc[-2]) - 1) * 100
+                    ngx_c = ((ngx_v / sentinels['^NGX'].iloc[-2]) - 1) * 100
+                    
+                    # 수치 무결성 체크 (nan일 경우 0.0)
+                    nbi_c = 0.0 if np.isnan(nbi_c) else nbi_c
+                    ngx_c = 0.0 if np.isnan(ngx_c) else ngx_c
+                    
+                    self.indices_report = f"🧬 NBI: {nbi_v:,.2f} ({nbi_c:+.1f}%)\n🚀 NGX: {ngx_v:,.2f} ({ngx_c:+.1f}%)"
+                    
+                    # 지수 상태에 따른 가산점 보정 (파일 데이터만 쓰는 것보다 정밀함 추가)
+                    if nbi_c > 0.5: self.v7_p += 2.0
+                    if ngx_c < -0.5: self.v8_p += 2.0
+            except Exception as e:
+                print(f"⚠️ 지수 호출만 건너뜁니다 (이유: {e})")
 
-            # 상태 판정 (형님 텍스트 포맷 그대로)
+            # --- [Part C: 최종 무결성 확보 및 판정] ---
+            # 가산점 후에도 0~100 범위를 넘지 않게 조정
+            self.v8_p = max(5.0, min(95.0, self.v8_p))
+            self.v7_p = 100 - self.v8_p
+
+            # 상태 판정 로직
             if self.v8_p > 60:
                 self.market_state = "🚨 [수비 강화] 현금 비중 압도적 유지"
             elif self.v8_p > 50:
@@ -139,13 +149,15 @@ class QuantumControlCenter:
             else:
                 self.market_state = "🔥 [적극 공략] 중소형주/바이오 탄력 구간"
 
-            # 형님의 스위치 강제 보정 로직
+            # 형님의 스위치 강제 보정 로직 (V8이 0.6 이상이면 강제 60% 고정)
             if v8_raw > 0.6 and self.v8_p < 60:
                 self.v8_p, self.v7_p = 60.0, 40.0
 
             return True
+
         except Exception as e:
-            print(f"❌ 매크로 분석 단계 실패: {e}")
+            # 파일이 없거나 데이터가 깨졌을 때만 '진짜 실패' 보고
+            print(f"❌ 매크로 분석 치명적 실패: {e}")
             return False
 
     def floor_1_action(self):
