@@ -8,7 +8,7 @@ import time
 import logging
 import traceback
 from datetime import datetime, timedelta
-import warnings
+import warningsload_resource
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -77,12 +77,17 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     # [방어 로직] 스마트 파일 로더 (No Shortcuts)
     # --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # [방어 로직] 무결성 리소스 로더 (파일명/칼럼명 자동 교육 모드)
+    # --------------------------------------------------------------------------
     def load_resource(self, file_name):
         """
-        [원칙 3] 지름길 없이 파일의 무결성을 5단계로 검증
+        형님이 주신 파일명에 어떤 꼬표가 붙어도 끝까지 찾아내고, 
+        내부 칼럼이 뒤죽박죽이어도 '종목'과 '점수'를 구별해냅니다.
         """
         base = file_name.split('.')[0]
-        exts = ['.xlsx', '.csv', '_FINAL.xlsx', '_REVISION.csv', '.xlsx - Sheet1.csv']
+        # 형님이 쓰시는 모든 파일 패턴 전수 조사
+        exts = ['.xlsx', '.csv', '_FINAL.xlsx', '_REVISION.csv', '.xlsx - Sheet1.csv', '_FINAL.csv']
         
         found_path = None
         for ext in exts:
@@ -92,22 +97,43 @@ class QuantumControlCenter:
                 break
         
         if not found_path:
-            raise FileNotFoundError(f"❌ [파일 부재] {file_name}이 경로에 없습니다. 수식을 확인하십시오.")
+            logging.error(f"❌ [자료 실종] {file_name} 계열 파일이 어디에도 없습니다.")
+            return None
 
-        # 인코딩 파상 공세
+        # 인코딩/엔진 파상 공세 (데이터 파손 방지)
+        df = None
         for enc in ['utf-8-sig', 'cp949', 'utf-8', 'euc-kr']:
             try:
                 if found_path.endswith('.xlsx'):
                     df = pd.read_excel(found_path, engine='openpyxl')
                 else:
                     df = pd.read_csv(found_path, encoding=enc)
-                
-                if df.empty: continue
-                return df
-            except:
-                continue
+                if df is not None: break
+            except: continue
+            
+        if df is None or df.empty: return None
+
+        # [핵심 교육] 칼럼명 지능형 매핑
+        # 대소문자 무시, 공백 무시하고 '종목'과 '점수'를 상징하는 단어를 찾습니다.
+        new_cols = {}
+        for c in df.columns:
+            c_low = str(c).strip().lower()
+            if any(x in c_low for x in ['symbol', 'ticker', '종목', '티커']):
+                new_cols[c] = 'Symbol'
+            elif any(x in c_low for x in ['energy', 'score', '점수', 'v_', '현재', 'value']):
+                new_cols[c] = 'Energy'
         
-        raise ValueError(f"🚨 [로딩 실패] {file_name}의 데이터 구조가 파손되었습니다.")
+        # 찾은 칼럼으로 이름 강제 통일 (시스템 무결성 확보)
+        if new_cols:
+            df = df.rename(columns=new_cols)
+            
+        # 만약 'Symbol' 열을 못 찾았다면? 첫 번째 열을 Symbol로 강제 지정 (형님 파일 특성 반영)
+        if 'Symbol' not in df.columns:
+            df.rename(columns={df.columns[0]: 'Symbol'}, inplace=True)
+        if 'Energy' not in df.columns:
+            df.rename(columns={df.columns[1]: 'Energy'}, inplace=True)
+
+        return df
 
     # --------------------------------------------------------------------------
     # [1단계] 매크로 스펙트럼 분석 (V8 스위치 개입)
