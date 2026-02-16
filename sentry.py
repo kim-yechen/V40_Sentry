@@ -243,60 +243,65 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 2층 4개 섹션 정밀 발굴 (Duplicate Labels 및 인덱스 붕괴 완벽 방어)
+        [공정 3] 형님이 주신 7개 파일 구조 전수 조사 기반 최종 복원
         """
-        logging.info("공정 3: 2층 데이터 복원 가동 (중복 라벨 방어 모드)...")
+        logging.info("공정 3: 형님 엑셀 실데이터 기반 3333 무결성 복구...")
+        
+        # [실제 파일 매핑] 형님이 주신 파일명 그대로 박았습니다.
         job_list = [
-            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT", ['V_Energy', 'Energy']),
-            ("🎯 [BEST]", "V40_BEST_TARGETS", ['V_Energy', 'Energy']),
-            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837", ['Q_Score', 'V_Energy', 'Energy']),
-            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL", ['V_Energy', 'Energy'])
+            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT.xlsx - 세부지표.csv", "V_Energy"),
+            ("🎯 [BEST]", "V40_BEST_TARGETS.xlsx - Sheet1.csv", "V_Energy"),
+            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837.xlsx - Sheet1.csv", "Q_Score"),
+            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL.xlsx - Sheet1.csv", "V_Energy")
         ]
         
         all_targets = []
-        for title, file, score_cols in job_list:
+        for title, file_name, energy_col in job_list:
             try:
-                raw_df = self.load_resource(file)
-                if raw_df is None or raw_df.empty:
-                    self.sections[title] = ["❌ 파일부재"] * 3
+                # 1. 파일 로딩 (형님이 주신 인코딩 utf-8-sig 적용)
+                if not os.path.exists(file_name):
+                    self.sections[title] = ["❌ 파일실종"] * 3
                     continue
+                
+                df = pd.read_csv(file_name, encoding='utf-8-sig')
+                
+                # 2. 중복 라벨 및 인덱스 붕괴 방지 (에러 원천 차단)
+                df = df.loc[:, ~df.columns.duplicated()].copy()
+                df = df.dropna(how='all').reset_index(drop=True)
 
-                # [수선] 중복 컬럼 및 인덱스 초기화 (에러 원천 차단)
-                df = raw_df.loc[:, ~raw_df.columns.duplicated()].copy() # 중복 컬럼 제거
-                df = df.reset_index(drop=True) # 인덱스 강제 초기화
-
-                # 1. 컬럼 매핑 (형님 엑셀 관상 분석)
-                sym_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['symbol', 'ticker', '종목'])), df.columns[0])
-                score_col = next((c for c in df.columns if any(x in str(c).lower() for x in score_cols)), df.columns[1])
-
-                # 2. 데이터 청소 (콤마 제거 및 수치화)
-                def clean_val(x):
+                # 3. 컬럼 매핑 (형님 엑셀 전용)
+                sym_col = 'Symbol' if 'Symbol' in df.columns else 'Ticker'
+                
+                # 4. 수치 정제 (수천만 점 콤마 제거 로직)
+                def to_float(x):
                     try: return float(str(x).replace(',', '').strip())
                     except: return 0.0
 
-                df['Clean_Score'] = df[score_col].apply(clean_num)
-                
-                # 3. 최신 데이터 추출 (BNAI 등 날짜 겹침 방지)
-                if title == "🤖 [BNAI]":
-                    df = df.sort_index().tail(1)
+                df['Final_Score'] = df[energy_col].apply(to_float)
 
-                # 4. 상위 3개 선발 (3333 원칙)
-                top3 = df.sort_values(by='Clean_Score', ascending=False).head(3)
+                # 5. 최신 데이터 정렬 (BNAI 등 날짜 겹침 방지)
+                if title == "🤖 [BNAI]":
+                    # BNAI는 날짜(Date) 기준 최신 3개
+                    df = df.sort_index(ascending=False)
+
+                # 6. 상위 3개 선발 (3333 완수)
+                top3 = df.sort_values(by='Final_Score', ascending=False).head(3)
                 
                 res = []
                 for _, row in top3.iterrows():
                     sym = str(row[sym_col]).strip()
-                    val = row['Clean_Score']
-                    f_val = f"{val/1000000:.1f}M" if val >= 1000000 else f"{val:,.1f}"
+                    score = row['Final_Score']
+                    # 가독성: 수천만 점은 M단위, 일반 점수는 소수점 1자리
+                    f_val = f"{score/1000000:.1f}M" if score >= 1000000 else f"{score:,.1f}"
                     res.append(f"{sym}({f_val})")
-                    all_targets.append({"Section": title, "Symbol": sym, "Energy": val})
+                    all_targets.append({"Section": title, "Symbol": sym, "Energy": score})
                 
                 while len(res) < 3: res.append("⚠️ 타겟부재")
                 self.sections[title] = res[:3]
-                
+
             except Exception as e:
-                logging.error(f"🚨 {title} 섹션 복구 실패: {str(e)}")
-                self.sections[title] = ["❌ 데이터모순"] * 3
+                logging.error(f"🚨 {title} 치명적 오류: {str(e)}")
+                self.sections[title] = ["❌ 구조붕괴"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
