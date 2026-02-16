@@ -120,8 +120,7 @@ class QuantumControlCenter:
                     # 등락률 계산
                     nbi_change = (self.nbi_val / sentinels['^NBI'].iloc[-2] - 1) * 100
                     ngx_change = (self.ngx_val / sentinels['^NGX'].iloc[-2] - 1) * 100
-                    # calculate_macro_spectrum 함수 내부 어딘가...
-self.indices_report = f"🧬 NBI: {nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {ngx_val:,.2f} ({ngx_change:+.1f}%)"
+                    self.indices_report = f"🧬 NBI: {nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {ngx_val:,.2f} ({ngx_change:+.1f}%)"
                     
                     # (기존 가산점 로직 유지...)
                 
