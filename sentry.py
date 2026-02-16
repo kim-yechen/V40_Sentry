@@ -360,15 +360,20 @@ class QuantumControlCenter:
             print(f"🚨 공정 중단: {e}")
             error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 이 부분 로직이 모순되거나 파일이 꼬였습니다. 수정 부탁드립니다!"
             
-            # 복잡하게 try-except 또 쓰지 말고, 안전하게 한 줄로 발송 시도
-            if hasattr(self, 'send_telegram_text'):
-                self.send_telegram_text(error_msg)
-            else:
-                # 만약 함수가 없으면 API 직접 호출 (가장 확실한 방법)
-                url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
-                import requests
-                requests.post(url, json={"chat_id": self.chat_id, "text": error_msg}, timeout=5)
-
+            # [수정] 복잡한 중첩 try-except 제거 -> 안전한 발송 로직으로 통합
+            try:
+                if hasattr(self, 'send_telegram_text'):
+                    self.send_telegram_text(error_msg)
+                else:
+                    # 함수가 없을 경우를 대비한 직결 통로
+                    import requests
+                    url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
+                    requests.post(url, json={"chat_id": self.chat_id, "text": error_msg}, timeout=5)
+            except Exception as telegram_err:
+                print(f"🚨 텔레그램 최종 발송 실패: {telegram_err}")
+                
+            print(f"\n🚨 에러 보고 완료: {e}")
+            
 # --- 여기서부터는 클래스 밖입니다 ---
 if __name__ == "__main__":
     # 스위치 2: 보수적 관점 유지
