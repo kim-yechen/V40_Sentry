@@ -339,57 +339,66 @@ class QuantumControlCenter:
             return None
 
     def send_telegram(self, file_path):
-        """[수정본] 초록불이든 빨간불이든, 형님께 보고는 무조건 합니다."""
+        """[긴급 수선본] 텔레그램 통로 강제 개통"""
+        print("✉️ 텔레그램 보고 시도...")
         try:
-            # 1. 텍스트 리포트 발송 (타임아웃 추가해서 무한대기 방지)
-            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                         json={"chat_id": self.chat_id, "text": self.analysis_report},
-                         timeout=10)
+            # 1. 텍스트 리포트 전송 (data 방식으로 변경하여 안정성 확보)
+            msg_url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
+            # 메시지가 너무 길면 잘릴 수 있으므로 안전 처리
+            safe_text = self.analysis_report[:4000] 
             
-            # 2. 파일 전송 조건 전면 수정
-            # - 토요일(5)이거나 
-            # - V7 에너지가 50을 넘는 '초록불' 상황이거나
-            # - 형님이 스위치를 2 이상으로 올렸을 때 무조건 발송
+            resp = requests.post(msg_url, data={
+                "chat_id": self.chat_id, 
+                "text": safe_text
+            }, timeout=15)
+            
+            if resp.status_code != 200:
+                print(f"⚠️ 메시지 전송 실패: {resp.text}")
+
+            # 2. 파일 전송 (조건부 전송 로직 유지하되 강제 전송력 강화)
             kst_now = datetime.utcnow() + timedelta(hours=9)
+            # 조건: 토요일(5) OR V7강세 OR 스위치 2이상
             if kst_now.weekday() == 5 or self.v7_p > 50 or self.macro_v8_switch >= 2:
-                with open(file_path, 'rb') as f:
-                    requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
-                                 data={'chat_id': self.chat_id, 'caption': f"📊 V40 무결성 검증본 (V7:{self.v7_p:.1f}%)"}, 
-                                 files={'document': f},
-                                 timeout=20)
-            print("✉️ 텔레그램 보고 완료")
+                if file_path and os.path.exists(file_path):
+                    doc_url = f"https://api.telegram.org/bot{self.t_token}/sendDocument"
+                    with open(file_path, 'rb') as f:
+                        f_resp = requests.post(doc_url, data={
+                            'chat_id': self.chat_id, 
+                            'caption': f"📊 V40 무결성 검증본 (V7:{self.v7_p:.1f}%)"
+                        }, files={'document': f}, timeout=30)
+                        if f_resp.status_code == 200:
+                            print("✅ 엑셀 파일 전송 성공")
+                        else:
+                            print(f"⚠️ 파일 전송 실패: {f_resp.text}")
+            
+            print("🏁 텔레그램 공정 최종 완료")
+            
         except Exception as e:
-            print(f"❌ 보고 전송 장애: {e}")
+            print(f"❌ 텔레그램 통신 치명적 장애: {e}")
 
     def run_process(self):
+        """공정 실행 및 에러 발생 시 형님께 즉시 SOS"""
         try:
-            if not self.calculate_macro_spectrum(): raise ValueError("매크로 실패")
-            if not self.floor_1_action(): raise ValueError("1층 실패")
-            if not self.floor_2_hunting(): raise ValueError("2층 실패") # 여기서 12개 뽑음
+            if not self.calculate_macro_spectrum(): raise ValueError("매크로 분석 단계 실패")
+            if not self.floor_1_action(): raise ValueError("1층 보유주 점검 실패")
+            if not self.floor_2_hunting(): raise ValueError("2층 타겟 발굴 실패")
             
-            report_file = self.build_and_save_report() # 여기서 리포트 만듦
+            report_file = self.build_and_save_report()
             if report_file:
-                self.send_telegram(report_file) # 전송
-            print("🏁 모든 공정 완료.")
+                self.send_telegram(report_file)
+            print("🏁 모든 시스템 정상 종료.")
         
         except Exception as e:
-            # [원칙 3 준수] 에러 발생 시 즉시 형님께 SOS 텔레그램 발송
-            print(f"🚨 공정 중단: {e}")
-            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 이 부분 로직이 모순되거나 파일이 꼬였습니다. 수정 부탁드립니다!"
-            
-            # [수정] 복잡한 중첩 try-except 제거 -> 안전한 발송 로직으로 통합
+            print(f"🚨 시스템 중단: {e}")
+            # 에러 발생 시에도 텔레그램 발송 시도 (가장 원시적이고 확실한 방법)
             try:
-                if hasattr(self, 'send_telegram_text'):
-                    self.send_telegram_text(error_msg)
-                else:
-                    # 함수가 없을 경우를 대비한 직결 통로
-                    import requests
-                    url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
-                    requests.post(url, json={"chat_id": self.chat_id, "text": error_msg}, timeout=5)
-            except Exception as telegram_err:
-                print(f"🚨 텔레그램 최종 발송 실패: {telegram_err}")
-                
-            print(f"\n🚨 에러 보고 완료: {e}")
+                err_url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
+                requests.post(err_url, data={
+                    "chat_id": self.chat_id, 
+                    "text": f"🚨 [V40 긴급 중단]\n이유: {str(e)}\n\n형님, 로직에 모순이 발생했습니다. 즉시 확인 바랍니다!"
+                }, timeout=10)
+            except:
+                pass
             
 # --- 여기서부터는 클래스 밖입니다 ---
 if __name__ == "__main__":
