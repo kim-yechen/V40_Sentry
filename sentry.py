@@ -243,80 +243,67 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 2층 12개 타겟 정밀 사냥 (Preservation & Deep Trace)
-        원칙: 꼼수 없이 3333을 채우되, 데이터의 원형을 보존한다.
+        [공정 3] 2층 4개 섹션 정밀 발굴 (형님 엑셀 구조 완벽 대응 버전)
         """
-        logging.info("공정 3: 2층 4개 섹션 정밀 발굴 및 데이터 복원 가동...")
+        logging.info("공정 3: 2층 데이터 복원 및 원형 보존 가동...")
         job_list = [
-            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT"),
-            ("🎯 [BEST]", "V40_BEST_TARGETS"),
-            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837"),
-            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL")
+            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT", ['V_Energy', 'Energy']),
+            ("🎯 [BEST]", "V40_BEST_TARGETS", ['V_Energy', 'Energy']),
+            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837", ['Q_Score', 'V_Energy', 'Energy']),
+            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL", ['V_Energy', 'Energy'])
         ]
         
         all_targets = []
-        
-        for title, file in job_list:
+        for title, file, score_cols in job_list:
             try:
-                # 1. 파일 로딩 무결성 체크
                 df = self.load_resource(file)
                 if df is None or df.empty:
-                    raise ValueError(f"{file} 데이터가 비어있습니다.")
+                    self.sections[title] = ["❌ 파일없음"] * 3
+                    continue
 
-                # 2. 지능형 컬럼 사냥 (Column Hunting)
-                # 단순 위치 지정이 아니라, 내용물을 분석해서 매핑합니다.
-                cols = [str(c).strip() for c in df.columns]
+                # 1. 컬럼명 보정 (종목명)
+                sym_col = 'Symbol' if 'Symbol' in df.columns else ('Ticker' if 'Ticker' in df.columns else df.columns[0])
                 
-                # 종목 열 찾기: 'Symbol', 'Ticker' 우선, 없으면 문자열이 가장 많은 열 선택
-                sym_idx = next((i for i, c in enumerate(cols) if c.lower() in ['symbol', 'ticker', '종목']), 0)
-                
-                # 점수 열 찾기: 'Energy', 'Score', 'V_' 포함 우선, 없으면 수치형 데이터 열 선택
-                score_idx = next((i for i, c in enumerate(cols) if any(x in c.lower() for x in ['energy', 'score', 'v_', '점수', '현재'])), 1)
-                
-                target_sym_col = df.columns[sym_idx]
-                target_score_col = df.columns[score_idx]
+                # 2. 컬럼명 보정 (점수)
+                energy_col = None
+                for col in score_cols:
+                    if col in df.columns:
+                        energy_col = col
+                        break
+                if not energy_col: energy_col = df.columns[1]
 
-                # 3. 데이터 청소 및 수치 복원
-                # 날짜나 텍스트가 섞여 있어도 수치만 골라내어 '형님의 수천만 점'을 보존합니다.
-                df[target_score_col] = pd.to_numeric(df[target_score_col], errors='coerce')
+                # 3. 데이터 정제 (콤마 제거 및 최신 데이터 추출)
+                working_df = df.copy()
+                if title == "🤖 [BNAI]": # BNAI는 가장 최신 날짜 데이터 사용
+                    working_df = working_df.tail(1)
+
+                def clean_num(val):
+                    try:
+                        return float(str(val).replace(',', '').strip())
+                    except:
+                        return 0.0
+
+                working_df['Clean_Score'] = working_df[energy_col].apply(clean_num)
                 
-                # 4. 정렬 및 정예 3인 선발 (3333 원칙)
-                # NaN(결측치)은 하단으로 보내고, 실제 존재하는 가장 높은 점수 3개를 뽑습니다.
-                sorted_df = df.dropna(subset=[target_score_col]).sort_values(by=target_score_col, ascending=False)
-                top3 = sorted_df.head(3).copy()
+                # 4. 상위 3개 추출
+                top3 = working_df.sort_values(by='Clean_Score', ascending=False).head(3)
                 
                 res = []
                 for _, row in top3.iterrows():
-                    raw_sym = str(row[target_sym_col]).strip()
-                    raw_val = row[target_score_col]
-                    
-                    # [무결성 체크] 날짜 형식이나 쓰레기 값 필터링
-                    if len(raw_sym) > 15 or "-" in raw_sym and len(raw_sym) > 8:
-                        # 종목명에 날짜가 들어왔을 경우 다음 순번 탐색 (로직 보강)
-                        continue
-                    
-                    # 수천만 단위 콤마 포맷팅 (가독성 무결성)
-                    formatted_val = f"{raw_val:,.1f}" if raw_val > 1000 else f"{raw_val:.2f}"
-                    
-                    res.append(f"{raw_sym}({formatted_val})")
-                    all_targets.append({
-                        "Section": title, 
-                        "Symbol": raw_sym, 
-                        "Energy": raw_val,
-                        "Capture_Time": datetime.now().strftime('%Y-%m-%d %H:%M')
-                    })
+                    sym = str(row[sym_col]).strip()
+                    val = row['Clean_Score']
+                    # 수천만 단위 가독성 처리
+                    f_val = f"{val/1000000:.1f}M" if val >= 1000000 else f"{val:,.1f}"
+                    res.append(f"{sym}({f_val})")
+                    all_targets.append({"Section": title, "Symbol": sym, "Energy": val})
                 
-                # 3333 부족분 발생 시 패딩 (지름길 방지)
-                while len(res) < 3:
-                    res.append("⚠️ 데이터모순")
-                
-                self.sections[title] = res[:3] # 정확히 3개만 유지
+                while len(res) < 3: res.append("⚠️ 타겟부재")
+                self.sections[title] = res[:3]
                 
             except Exception as e:
-                logging.error(f"🚨 {title} 섹션 붕괴: {str(e)}")
-                self.sections[title] = ["❌ 파일구조오류"] * 3
-                
-        # 최종 데이터 프레임 갱신 (1+1-1=Complete 원칙)
+                logging.error(f"🚨 {title} 복원 실패: {str(e)}")
+                self.sections[title] = ["❌ 데이터오류"] * 3
+
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
 
