@@ -243,16 +243,16 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 파일명/컬럼명 완전 무시 -> 데이터 관상 기반 강제 해체
+        [공정 3] 13시간의 대장정 종결 - 무차별 데이터 해체 및 3333 강제 복원
         """
-        logging.info("공정 3: 13시간의 사투 종결. 무차별 데이터 해체 및 복원 가동...")
+        logging.info("공정 3: 형님 실데이터 관상 기반 무차별 해체 가동...")
         
-        # 각 섹션별 데이터 관상(Key) 정의
+        # 각 섹션별 '진짜 관상' 정의 (형님 스니펫 100% 반영)
         configs = [
-            {"title": "🛡️ [SHIELD]", "file_key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
-            {"title": "🎯 [BEST]", "file_key": "BEST", "score": "V_Energy", "id": "Ticker"},
-            {"title": "🚀 [TEN-B]", "file_key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
-            {"title": "🤖 [BNAI]", "file_key": "BNAI", "score": "V_Energy", "id": "Date"}
+            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
+            {"title": "🎯 [BEST]", "key": "BEST", "score": "V_Energy", "id": "Ticker"},
+            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
+            {"title": "🤖 [BNAI]", "key": "BNAI", "score": "V_Energy", "id": "Date"}
         ]
         
         all_targets = []
@@ -264,7 +264,7 @@ class QuantumControlCenter:
                 target_df = None
                 # 1. 파일 전수 조사 (파일명 키워드 매칭)
                 for f in files:
-                    if cfg['file_key'] in f:
+                    if cfg['key'] in f:
                         df = pd.read_csv(f, encoding='utf-8-sig')
                         if cfg['score'] in df.columns:
                             target_df = df.copy()
@@ -274,28 +274,29 @@ class QuantumControlCenter:
                     self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
                     continue
 
-                # 2. 콤마 제거 및 수치 강제 변환 (48,438,050.3 대응)
+                # 2. 콤마 제거 및 수치 강제 변환 (TIRX 48,438,050.3 대응)
                 def force_num(x):
-                    try: return float(str(x).replace(',', '').strip())
+                    try:
+                        val = str(x).replace(',', '').strip()
+                        return float(val)
                     except: return 0.0
 
                 target_df['Clean_Score'] = target_df[cfg['score']].apply(force_num)
 
-                # 3. 3333 정렬 및 추출
-                if cfg['title'] == "🤖 [BNAI]":
-                    # BNAI는 최신 날짜(하단) 데이터 기준
-                    top3 = target_df.tail(3).sort_values(by='Clean_Score', ascending=False)
+                # 3. 3333 정렬 및 추출 (BNAI는 최신순, 나머지는 점수순)
+                if "BNAI" in cfg['title']:
+                    top3 = target_df.sort_index(ascending=False).head(3)
                 else:
                     top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
 
                 res = []
                 for _, row in top3.iterrows():
+                    # ID 컬럼(Symbol/Ticker/Date) 추출
                     s = str(row.get(cfg['id'], "TARGET")).strip()
-                    # 날짜 가독성 (2026-01-20 -> 01-20)
-                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:]
+                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] # 날짜 가독성
                     
                     v = row['Clean_Score']
-                    # 수천만 점 가독성 (TIRX 48.4M)
+                    # 수천만 점 M단위 가독성 (TIRX 48.4M)
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
                     all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
@@ -305,7 +306,7 @@ class QuantumControlCenter:
 
             except Exception as e:
                 logging.error(f"🚨 {cfg['title']} 해체 실패: {str(e)}")
-                self.sections[cfg['title']] = ["❌ 해체붕괴"] * 3
+                self.sections[cfg['title']] = ["❌ 데이터붕괴"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
