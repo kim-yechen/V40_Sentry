@@ -243,58 +243,54 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 파일명 자동 매칭 및 데이터 원형 복원 (Final Integrity)
+        [공정 3] 형님 업로드 파일 실명(Real Path) 강제 매핑 버전
         """
-        logging.info("공정 3: 형님 업로드 파일 자동 매칭 및 3333 추출 시작...")
+        logging.info("공정 3: 형님 업로드 파일 실명 기반 정밀 추출...")
         
-        # [검거 타겟 설정]
-        targets_config = {
-            "🛡️ [SHIELD]": {"file_key": "COMMODITY_ANALYSIS_REPORT", "score": "V_Energy", "sym": "Symbol"},
-            "🎯 [BEST]": {"file_key": "V40_BEST_TARGETS", "score": "V_Energy", "sym": "Ticker"},
-            "🚀 [TEN-B]": {"file_key": "V40_TEN_BAGGER_REPORT_0837", "score": "Q_Score", "sym": "Symbol"},
-            "🤖 [BNAI]": {"file_key": "V7_RESULT_BNAI_FINAL", "score": "V_Energy", "sym": "Date"}
-        }
+        # [실제 경로 타격] 시스템에 올라온 이름 토씨 하나 안 틀리고 박았습니다.
+        job_config = [
+            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT.xlsx - 세부지표.csv", "Symbol", "V_Energy"),
+            ("🎯 [BEST]", "V40_BEST_TARGETS.xlsx - Sheet1.csv", "Ticker", "V_Energy"),
+            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837.xlsx - Sheet1.csv", "Symbol", "Q_Score"),
+            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL.xlsx - Sheet1.csv", "Date", "V_Energy")
+        ]
         
         all_targets = []
-        # 현재 폴더의 모든 파일 목록 확보
-        current_files = os.listdir('.')
-
-        for title, cfg in targets_config.items():
+        for title, real_file, sym_col, energy_col in job_config:
             try:
-                # 1. 파일 자동 검거 (파일명에 키워드가 포함된 가장 적절한 파일 선택)
-                matched_file = next((f for f in current_files if cfg['file_key'] in f and f.endswith('.csv')), None)
+                # 파일 존재 확인 로직 강화
+                if not os.path.exists(real_file):
+                    # 만약 이름이 또 바뀌었을 경우를 대비한 2차 검색 루프
+                    found = False
+                    for f in os.listdir('.'):
+                        if real_file.split(' - ')[0] in f and f.endswith('.csv'):
+                            real_file = f
+                            found = True
+                            break
+                    if not found:
+                        self.sections[title] = ["❌ 파일실종"] * 3
+                        continue
                 
-                if not matched_file:
-                    self.sections[title] = ["❌ 파일실종"] * 3
-                    continue
+                df = pd.read_csv(real_file, encoding='utf-8-sig')
                 
-                # 2. 데이터 로드 및 중복 제거
-                df = pd.read_csv(matched_file, encoding='utf-8-sig')
-                df = df.loc[:, ~df.columns.duplicated()].copy()
-                df = df.dropna(subset=[cfg['score']]).reset_index(drop=True)
-
-                # 3. 수치 정제 (수천만 점 콤마 완벽 제거)
-                def force_float(x):
-                    try: return float(str(x).replace(',', '').strip())
+                # 수치 정제 (콤마 제거 로직)
+                def clean_v(v):
+                    try: return float(str(v).replace(',', '').strip())
                     except: return 0.0
 
-                df['Clean_Score'] = df[cfg['score']].apply(force_float)
+                df['Clean_Score'] = df[energy_col].apply(clean_v)
 
-                # 4. 상위 3개 선발 (BNAI는 최신순, 나머지는 점수순)
+                # 상위 3개 선발
                 if "BNAI" in title:
-                    # BNAI는 날짜 기준 최하단 3개 중 점수 높은 순
-                    target_rows = df.tail(10).sort_values(by='Clean_Score', ascending=False).head(3)
-                    # BNAI는 날짜를 종목명 대신 노출
-                    sym_name = cfg['sym']
+                    # BNAI는 날짜 기준 최하단(최신) 데이터 사용
+                    top3 = df.tail(3).sort_values(by='Clean_Score', ascending=False)
                 else:
-                    target_rows = df.sort_values(by='Clean_Score', ascending=False).head(3)
+                    top3 = df.sort_values(by='Clean_Score', ascending=False).head(3)
 
                 res = []
-                for _, row in target_rows.iterrows():
-                    s = str(row.get(cfg['sym'], "TARGET")).strip()
-                    # 날짜 형식인 경우 월/일만 추출
-                    if "-" in s and len(s) > 8: s = s.split(' ')[0][-5:]
-                    
+                for _, row in top3.iterrows():
+                    s = str(row.get(sym_col, "TARGET")).strip()
+                    if "-" in s and len(s) > 10: s = s[:10] # 날짜 가독성
                     v = row['Clean_Score']
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
@@ -305,7 +301,7 @@ class QuantumControlCenter:
 
             except Exception as e:
                 logging.error(f"🚨 {title} 치명적 오류: {str(e)}")
-                self.sections[title] = ["❌ 데이터붕괴"] * 3
+                self.sections[title] = ["❌ 데이터오류"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
