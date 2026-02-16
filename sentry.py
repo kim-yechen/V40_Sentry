@@ -243,78 +243,69 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 파일명 무결성 파괴 및 데이터 전수 조사 (무조건 3333 추출)
+        [공정 3] 파일명/컬럼명 완전 무시 -> 데이터 관상 기반 강제 해체
         """
-        logging.info("공정 3: 폴더 내 모든 파일 전수 조사 및 데이터 강제 해체 시작...")
+        logging.info("공정 3: 13시간의 사투 종결. 무차별 데이터 해체 및 복원 가동...")
         
-        # 각 섹션이 찾아야 할 '데이터의 관상(컬럼명)' 정의
-        search_map = {
-            "🛡️ [SHIELD]": {"target_cols": ['V_Energy', 'MA5_Energy'], "id_cols": ['Symbol'], "keyword": "COMMODITY"},
-            "🎯 [BEST]": {"target_cols": ['V_Energy'], "id_cols": ['Ticker', 'Symbol'], "keyword": "BEST"},
-            "🚀 [TEN-B]": {"target_cols": ['Q_Score'], "id_cols": ['Symbol', 'Ticker'], "keyword": "TEN_BAGGER"},
-            "🤖 [BNAI]": {"target_cols": ['V_Energy'], "id_cols": ['Date'], "keyword": "BNAI"}
-        }
-
+        # 각 섹션별 데이터 관상(Key) 정의
+        configs = [
+            {"title": "🛡️ [SHIELD]", "file_key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
+            {"title": "🎯 [BEST]", "file_key": "BEST", "score": "V_Energy", "id": "Ticker"},
+            {"title": "🚀 [TEN-B]", "file_key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
+            {"title": "🤖 [BNAI]", "file_key": "BNAI", "score": "V_Energy", "id": "Date"}
+        ]
+        
         all_targets = []
         import os
-        # 현재 폴더의 모든 csv 파일 리스트 확보
-        all_csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
+        files = [f for f in os.listdir('.') if f.endswith('.csv')]
 
-        for title, cfg in search_map.items():
+        for cfg in configs:
             try:
-                found_df = None
-                # 1. 모든 파일을 열어서 해당 섹션의 데이터가 있는지 확인 (파일명 무시)
-                for f_name in all_csv_files:
-                    try:
-                        # 한글 깨짐 방지 인코딩 파상 공세
-                        for enc in ['utf-8-sig', 'cp949', 'utf-8']:
-                            temp_df = pd.read_csv(f_name, encoding=enc, low_memory=False)
-                            # 컬럼명 중 하나라도 일치하면 그 파일이 범인이다
-                            if any(c in temp_df.columns for c in cfg['target_cols']):
-                                # 파일명 키워드까지 맞으면 100% 확정
-                                if cfg['keyword'] in f_name:
-                                    found_df = temp_df.copy()
-                                    break
-                        if found_df is not None: break
-                    except: continue
-
-                if found_df is None:
-                    self.sections[title] = ["❌ 데이터실종"] * 3
+                target_df = None
+                # 1. 파일 전수 조사 (파일명 키워드 매칭)
+                for f in files:
+                    if cfg['file_key'] in f:
+                        df = pd.read_csv(f, encoding='utf-8-sig')
+                        if cfg['score'] in df.columns:
+                            target_df = df.copy()
+                            break
+                
+                if target_df is None:
+                    self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
                     continue
 
-                # 2. 데이터 청소 (중복 제거 및 수치화)
-                found_df = found_df.loc[:, ~found_df.columns.duplicated()].copy()
-                actual_score_col = next(c for c in cfg['target_cols'] if c in found_df.columns)
-                actual_id_col = next(c for c in cfg['id_cols'] if c in found_df.columns)
-
+                # 2. 콤마 제거 및 수치 강제 변환 (48,438,050.3 대응)
                 def force_num(x):
                     try: return float(str(x).replace(',', '').strip())
                     except: return 0.0
 
-                found_df['Clean_Score'] = found_df[actual_score_col].apply(force_num)
+                target_df['Clean_Score'] = target_df[cfg['score']].apply(force_num)
 
-                # 3. 3333 추출 로직
-                if "BNAI" in title:
-                    # BNAI는 최신 날짜순 (파일 하단)
-                    top3 = found_df.tail(3).sort_values(by='Clean_Score', ascending=False)
+                # 3. 3333 정렬 및 추출
+                if cfg['title'] == "🤖 [BNAI]":
+                    # BNAI는 최신 날짜(하단) 데이터 기준
+                    top3 = target_df.tail(3).sort_values(by='Clean_Score', ascending=False)
                 else:
-                    top3 = found_df.sort_values(by='Clean_Score', ascending=False).head(3)
+                    top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
 
                 res = []
                 for _, row in top3.iterrows():
-                    s = str(row.get(actual_id_col, "TARGET")).strip()
-                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] # 날짜 처리
+                    s = str(row.get(cfg['id'], "TARGET")).strip()
+                    # 날짜 가독성 (2026-01-20 -> 01-20)
+                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:]
+                    
                     v = row['Clean_Score']
+                    # 수천만 점 가독성 (TIRX 48.4M)
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
-                    all_targets.append({"Section": title, "Symbol": s, "Energy": v})
-
+                    all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
+                
                 while len(res) < 3: res.append("⚠️ 타겟부재")
-                self.sections[title] = res[:3]
+                self.sections[cfg['title']] = res[:3]
 
             except Exception as e:
-                logging.error(f"🚨 {title} 강제 해체 실패: {str(e)}")
-                self.sections[title] = ["❌ 해체불가"] * 3
+                logging.error(f"🚨 {cfg['title']} 해체 실패: {str(e)}")
+                self.sections[cfg['title']] = ["❌ 해체붕괴"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
