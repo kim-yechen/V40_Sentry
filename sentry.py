@@ -214,106 +214,87 @@ class QuantumControlCenter:
     def floor_2_hunting(self):
         """
         [무결성 검증] 3단계: 2층 신규 타켓 발굴
-        - Buy 신호 엄격 필터링 + 부족 시 사유 기록 + 엑셀 저장용 병합
+        - 로직 통합: Buy 신호 우선 필터링 + 부족 시 상위 종목 강제 추출 + 사유 기록
         """
-        print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
+        print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔 및 로직 통합 중...")
         try:
-            # 1. 파일 로드
+            # 1. 파일 로드 (Shield 분석용 v7c 포함)
+            v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
             v40_best = self._smart_file_loader("V40_BEST_TARGETS")
             v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837")
             
             self.best_summary = ""
             self.ten_summary = ""
-            combined_for_excel = [] # 엑셀 저장을 위한 리스트
+            combined_for_excel = [] 
 
             # --- [섹션 1: BEST TARGETS 필터링] ---
-            status_col = [c for c in v40_best.columns if 'Status' in c or 'Decision' in c or '결정' in c]
-            if status_col:
-                # Buy 신호만 필터링 (대소문자 구분 없이)
-                best_buys = v40_best[v40_best[status_col[0]].str.contains('Buy', na=False, case=False)].copy()
-                self.best_targets_list = best_buys.sort_values(by='V_Energy', ascending=False).head(3)
-                self.best_summary = f"({len(best_buys)}개 Buy 신호 포착)"
+            # Status 컬럼 찾기
+            best_status_col = [c for c in v40_best.columns if any(x in c for x in ['Status', 'Decision', '결정'])]
+            if best_status_col:
+                # 1순위: Buy 신호만 필터링
+                best_buys = v40_best[v40_best[best_status_col[0]].str.contains('Buy', na=False, case=False)].copy()
+                self.best_summary = f"({len(best_buys)}개 Buy 포착)"
                 
-                if not self.best_targets_list.empty:
-                    temp_best = self.best_targets_list.copy()
-                    temp_best['Source'] = '🎯 BEST'
-                    combined_for_excel.append(temp_best)
+                # 2순위: Buy가 부족하면? 그냥 상위 에너지 순으로 3개 채움 (형님 요청)
+                if len(best_buys) < 3:
+                    display_list = v40_best.sort_values(by='V_Energy', ascending=False).head(3).copy()
+                else:
+                    display_list = best_buys.sort_values(by='V_Energy', ascending=False).head(3).copy()
+                
+                self.best_targets_list = display_list
+                
+                # 엑셀 저장용 데이터 구성
+                temp_best = display_list.copy()
+                temp_best['Source'] = '🎯 BEST'
+                combined_for_excel.append(temp_best)
             else:
                 self.best_targets_list = pd.DataFrame()
-                self.best_summary = "(Status 컬럼 누락)"
+                self.best_summary = "(Status 컬럼 확인불가)"
 
             # --- [섹션 2: TEN-BAGGER 필터링] ---
-            status_col_ten = [c for c in v40_ten.columns if 'Status' in c or 'Decision' in c or '결정' in c]
-            if status_col_ten:
-                ten_buys = v40_ten[v40_ten[status_col_ten[0]].str.contains('Buy', na=False, case=False)].copy()
-                # 에너지 컬럼 유연하게 대응
-                e_col_ten = 'Q_Score' if 'Q_Score' in v40_ten.columns else [c for c in v40_ten.columns if 'Score' in c or '점수' in c][0]
-                self.ten_targets_list = ten_buys.sort_values(by=e_col_ten, ascending=False).head(3)
-                self.ten_summary = f"({len(ten_buys)}개 Buy 신호 포착)"
+            ten_status_col = [c for c in v40_ten.columns if any(x in c for x in ['Status', 'Decision', '결정'])]
+            if ten_status_col:
+                # 1순위: Buy 신호 필터링
+                ten_buys = v40_ten[v40_ten[ten_status_col[0]].str.contains('Buy', na=False, case=False)].copy()
+                self.ten_summary = f"({len(ten_buys)}개 Buy 포착)"
                 
-                if not self.ten_targets_list.empty:
-                    temp_ten = self.ten_targets_list.copy()
-                    temp_ten['Source'] = '🚀 TEN-B'
-                    combined_for_excel.append(temp_ten)
+                # 점수 컬럼 유연하게 찾기
+                e_col_ten = 'Q_Score' if 'Q_Score' in v40_ten.columns else [c for c in v40_ten.columns if 'Score' in c or '점수' in c][0]
+                
+                # 2순위: Buy 부족 시 상위 점수 순 3개 강제 추출
+                if len(ten_buys) < 3:
+                    display_ten = v40_ten.sort_values(by=e_col_ten, ascending=False).head(3).copy()
+                else:
+                    display_ten = ten_buys.sort_values(by=e_col_ten, ascending=False).head(3).copy()
+                
+                self.ten_targets_list = display_ten
+                
+                # 엑셀 저장용 데이터 구성
+                temp_ten = display_ten.copy()
+                temp_ten['Source'] = '🚀 TEN-B'
+                combined_for_excel.append(temp_ten)
             else:
                 self.ten_targets_list = pd.DataFrame()
-                self.ten_summary = "(Status 컬럼 누락)"
+                self.ten_summary = "(Status 컬럼 확인불가)"
 
-            # --- [섹션 3: 원칙 1 준수 - 엑셀 저장용 데이터 통합] ---
+            # --- [섹션 3: Shield 데이터 통합 (선택사항)] ---
+            if 'Grade' in v7c.columns:
+                shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].head(3).copy()
+                if not shield.empty:
+                    shield['Source'] = '🛡️ Shield'
+                    combined_for_excel.append(shield)
+
+            # --- [원칙 1] 데이터 통합 및 저장 준비 ---
             if combined_for_excel:
                 self.floor_2_df = pd.concat(combined_for_excel, ignore_index=True)
             else:
-                # Buy 신호가 하나도 없을 경우 빈 데이터프레임이라도 생성 (저장 에러 방지)
                 self.floor_2_df = pd.DataFrame(columns=['Symbol', 'V_Energy', 'Source'])
 
             return True
 
         except Exception as e:
             print(f"❌ 2층 분석 실패: {e}")
-            return Falsedef floor_2_hunting(self):
-            
-        print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
-        try:
-            v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
-            v40_best = self._smart_file_loader("V40_BEST_TARGETS")
-            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837")
-            
-            combined = []
-            
-            # --- [섹션 1: Shield] (필요시 출력용) ---
-            if 'Grade' in v7c.columns:
-                shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].head(3).copy()
-                if not shield.empty:
-                    shield['Source'] = '🛡️ Shield'
-                    e_col = 'V_Energy' if 'V_Energy' in shield.columns else shield.columns[1]
-                    combined.append(shield[['Symbol', e_col, 'Source']].rename(columns={e_col: 'V_Energy'}))
-
-            # --- [섹션 2: BEST TARGETS] (형님 요청: 무조건 3개) ---
-            if not v40_best.empty:
-                e_col = 'V_Energy' if 'V_Energy' in v40_best.columns else [c for c in v40_best.columns if 'Energy' in c or 'Score' in c][0]
-                s_col = 'Symbol' if 'Symbol' in v40_best.columns else v40_best.columns[0]
-                best = v40_best.sort_values(by=e_col, ascending=False).head(3).copy()
-                best['Source'] = '🎯 BEST'
-                combined.append(best[[s_col, e_col, 'Source']].rename(columns={s_col: 'Symbol', e_col: 'V_Energy'}))
-
-            # --- [섹션 3: TEN-BAGGER] (형님 요청: 무조건 3개) ---
-            if not v40_ten.empty:
-                # Buy 신호가 적을 수 있으므로 상위 점수 순으로 3개 강제 추출
-                score_col = 'Q_Score' if 'Q_Score' in v40_ten.columns else [c for c in v40_ten.columns if 'Score' in c][0]
-                s_col = 'Symbol' if 'Symbol' in v40_ten.columns else 'Ticker'
-                ten = v40_ten.sort_values(by=score_col, ascending=False).head(3).copy()
-                ten['Source'] = '🚀 TEN-B'
-                combined.append(ten[[s_col, score_col, 'Source']].rename(columns={s_col: 'Symbol', score_col: 'V_Energy'}))
-
-            if not combined:
-                raise ValueError("🚨 유효한 타겟 데이터가 없습니다.")
-
-            self.floor_2_df = pd.concat(combined, ignore_index=True)
-            return True
-
-        except Exception as e:
-            print(f"❌ 2층 분석 실패 상세: {e}")
-            raise ValueError(f"2층 사냥터 발굴 중 에러 발생: {str(e)}")
+            return False
             
     def build_and_save_report(self):
         """
@@ -424,11 +405,25 @@ class QuantumControlCenter:
             
             print("🏁 모든 공정 완료.")
         except Exception as e:
-            # [원칙 3 준수] 에러 발생 시 형님께 즉시 SOS 텔레그램 발송
-            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 수식이나 파일에 문제가 있어 보고가 중단되었습니다. 확인 부탁드립니다!"
+            def run_process(self):
+        """[원칙 3 준수] 문제 발생 시 즉시 형님께 SOS"""
+        try:
+            if not self.calculate_macro_spectrum(): raise ValueError("매크로 분석 실패")
+            if not self.floor_1_action(): raise ValueError("1층 진단 실패")
+            if not self.floor_2_hunting(): raise ValueError("2층 발굴 실패")
+            
+            report_file = self.build_and_save_report()
+            if report_file:
+                self.send_telegram(report_file)
+            
+            print("🏁 모든 공정 완료.")
+        except Exception as e:
+            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 수식이나 파일 확인 부탁드립니다!"
             requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
                          json={"chat_id": self.chat_id, "text": error_msg})
-            print(f"\n🚨 시스템 중단 및 보고 완료: {e}")
+            print(f"\n🚨 에러 보고 완료: {e}")
+
+# --- 여기서부터는 클래스 밖입니다 ---
 if __name__ == "__main__":
     # 스위치 2: 보수적 관점 유지
     engine = QuantumControlCenter(macro_v8_switch=2)
