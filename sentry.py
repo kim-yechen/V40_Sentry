@@ -120,7 +120,8 @@ class QuantumControlCenter:
                     # 등락률 계산
                     nbi_change = (self.nbi_val / sentinels['^NBI'].iloc[-2] - 1) * 100
                     ngx_change = (self.ngx_val / sentinels['^NGX'].iloc[-2] - 1) * 100
-                    self.indices_report = f"🧬 NBI: {self.nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {self.ngx_val:,.2f} ({ngx_change:+.1f}%)"
+                    # calculate_macro_spectrum 함수 내부 어딘가...
+self.indices_report = f"🧬 NBI: {nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {ngx_val:,.2f} ({ngx_change:+.1f}%)"
                     
                     # (기존 가산점 로직 유지...)
                 
@@ -265,12 +266,12 @@ class QuantumControlCenter:
     def build_and_save_report(self):
         """
         [원칙 1] 1+1-1=Complete
-        - 모든 분석 데이터를 엑셀로 먼저 저장한 후 리포트 텍스트 생성
+        [수정] 지수 위치 이동, 섹션별 5개 출력, nan% 방어 로직 통합
         """
         kst_now = datetime.utcnow() + timedelta(hours=9)
         file_name = f"V40_Integrated_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
         
-        # 1. 엑셀 파일 생성 및 시트별 저장
+        # 1. [원칙 1] 분석 데이터를 엑셀로 먼저 저장 (파일 저장 전엔 절대 보고 안함)
         try:
             with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
                 if not self.floor_1_df.empty:
@@ -278,7 +279,7 @@ class QuantumControlCenter:
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2층_신규발굴', index=False)
                 
-                # 매크로 정보 시트
+                # 매크로 정보 시트 저장
                 macro_data = pd.DataFrame([{
                     "V7_Energy": self.v7_p, "V8_Cash": self.v8_p, 
                     "Market_State": self.market_state, "Report_Time": kst_now
@@ -296,7 +297,6 @@ class QuantumControlCenter:
         
         report = f"{title}\n\n"
         report += f"📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
-        report += f"{self.indices_report}\n"  # <--- 이 줄이 추가되어야 형님 폰에 뜹니다!
         report += f"📢 상태: {self.market_state}\n\n"
         
         report += "🏢 [1층 보유주 진단]\n"
@@ -304,11 +304,31 @@ class QuantumControlCenter:
             report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
             
         report += "\n🧬 [2층 신규 사냥터]\n"
+        
+        # --- [지수 라인: 형님 요청대로 2층 상단 배치] ---
+        # nan%가 뜨지 않도록 getattr로 안전하게 호출
+        nbi_txt = getattr(self, 'indices_report', "🧬 지수 정보를 불러오는 중입니다...").split('\n')[0] if hasattr(self, 'indices_report') else "🧬 NBI: 연결 확인 필요"
+        ngx_txt = getattr(self, 'indices_report', "").split('\n')[1] if hasattr(self, 'indices_report') and '\n' in self.indices_report else "🚀 NGX: 연결 확인 필요"
+        
+        # nan% 방어: 만약 문자열에 nan이 포함되어 있으면 깔끔하게 처리
+        if 'nan' in nbi_txt: nbi_txt = nbi_txt.replace('nan', '0.0')
+        if 'nan' in ngx_txt: ngx_txt = ngx_txt.replace('nan', '0.0')
+        
+        report += f"{nbi_txt}\n{ngx_txt}\n\n"
+
+        # --- [추천주 출력: BEST 5개 + TEN-B 5개] ---
         if not self.floor_2_df.empty:
-            # 시장 상황에 따른 전략적 텍스트 출력
-            targets = self.floor_2_df.head(7)
-            for _, r in targets.iterrows():
-                report += f"{r['Source']} {r['Symbol']} | E:{r['V_Energy']:.1f}\n"
+            # 1. BEST 섹션 (최대 5개)
+            best_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('BEST')].head(5)
+            for _, r in best_list.iterrows():
+                report += f"🎯 BEST {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
+            
+            report += "\n" # 섹션 간 줄바꿈
+
+            # 2. TEN-B 섹션 (최대 5개)
+            ten_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('TEN-B')].head(5)
+            for _, r in ten_list.iterrows():
+                report += f"🚀 TEN-B {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
         
         self.analysis_report = report
         return file_name
