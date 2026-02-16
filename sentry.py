@@ -212,78 +212,58 @@ class QuantumControlCenter:
             return False
 
     def floor_2_hunting(self):
-        """
-        [전수조사 완료 버전] 3단계: 2층 신규 타겟 발굴
-        - 텐배거 리포트 인식 강화 및 컬럼명 유연성 확보
-        """
         print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
         try:
-            # 1. 파일 로드 (파일명 패턴 대응 강화)
             v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
             v40_best = self._smart_file_loader("V40_BEST_TARGETS")
-            
-            # 텐배거 리포트: 0837 같은 숫자가 바뀌어도 찾을 수 있게 패턴 검색 권장 (여기선 일단 기존 파일명 유지하되 안전장치)
             v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837")
             
             combined = []
             
-            # --- [섹션 1: Shield/Grade A] ---
+            # --- [섹션 1: Shield] (필요시 출력용) ---
             if 'Grade' in v7c.columns:
-                shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].copy()
+                shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].head(3).copy()
                 if not shield.empty:
                     shield['Source'] = '🛡️ Shield'
-                    # 에너지 컬럼명이 V_Energy인지 확인 후 삽입
                     e_col = 'V_Energy' if 'V_Energy' in shield.columns else shield.columns[1]
-                    combined.append(shield[['Symbol', e_col, 'Source']].rename(columns={e_col: 'V_Energy'}).head(3))
+                    combined.append(shield[['Symbol', e_col, 'Source']].rename(columns={e_col: 'V_Energy'}))
 
-            # --- [섹션 2: BEST TARGETS] ---
+            # --- [섹션 2: BEST TARGETS] (형님 요청: 무조건 3개) ---
             if not v40_best.empty:
-                # 에너지 컬럼 유연하게 찾기
                 e_col = 'V_Energy' if 'V_Energy' in v40_best.columns else [c for c in v40_best.columns if 'Energy' in c or 'Score' in c][0]
+                s_col = 'Symbol' if 'Symbol' in v40_best.columns else v40_best.columns[0]
                 best = v40_best.sort_values(by=e_col, ascending=False).head(3).copy()
-                s_col = 'Symbol' if 'Symbol' in best.columns else ('Ticker' if 'Ticker' in best.columns else best.columns[0])
                 best['Source'] = '🎯 BEST'
                 combined.append(best[[s_col, e_col, 'Source']].rename(columns={s_col: 'Symbol', e_col: 'V_Energy'}))
 
-            # --- [섹션 3: TEN-BAGGER (형님이 찝으신 부분)] ---
-            # Status 컬럼이 있는지, Buy 신호가 있는지 꼼꼼히 체크
-            status_col = [c for c in v40_ten.columns if 'Status' in c or '결정' in c]
-            if status_col:
-                ten_targets = v40_ten[v40_ten[status_col[0]].str.contains('Buy|Buy-Ref', na=False)].head(3).copy()
-                if not ten_targets.empty:
-                    # Q_Score가 없을 경우를 대비해 순위나 다른 점수라도 가져옴
-                    score_col = 'Q_Score' if 'Q_Score' in ten_targets.columns else [c for c in ten_targets.columns if 'Score' in c or '점수' in c][0]
-                    ten_targets = ten_targets.rename(columns={score_col: 'V_Energy'})
-                    
-                    # [원칙 2] 데이터 커먼센스 체크: 점수가 음수면 로직 에러로 간주
-                    for val in ten_targets['V_Energy']:
-                        self.negative_check(val, "텐배거_에너지", min_limit=-1)
-                        
-                    s_col = 'Symbol' if 'Symbol' in ten_targets.columns else 'Ticker'
-                    ten_targets['Source'] = '🚀 TEN-B'
-                    combined.append(ten_targets[[s_col, 'V_Energy', 'Source']].rename(columns={s_col: 'Symbol'}))
+            # --- [섹션 3: TEN-BAGGER] (형님 요청: 무조건 3개) ---
+            if not v40_ten.empty:
+                # Buy 신호가 적을 수 있으므로 상위 점수 순으로 3개 강제 추출
+                score_col = 'Q_Score' if 'Q_Score' in v40_ten.columns else [c for c in v40_ten.columns if 'Score' in c][0]
+                s_col = 'Symbol' if 'Symbol' in v40_ten.columns else 'Ticker'
+                ten = v40_ten.sort_values(by=score_col, ascending=False).head(3).copy()
+                ten['Source'] = '🚀 TEN-B'
+                combined.append(ten[[s_col, score_col, 'Source']].rename(columns={s_col: 'Symbol', score_col: 'V_Energy'}))
 
-            # --- [최종 병합] ---
             if not combined:
-                # [원칙 3] 지름길 금지: 데이터가 없으면 없다고 보고
-                raise ValueError("🚨 모든 리포트에서 유효한 Buy 타겟을 찾지 못했습니다. 파일 내용을 확인하십시오.")
+                raise ValueError("🚨 유효한 타겟 데이터가 없습니다.")
 
             self.floor_2_df = pd.concat(combined, ignore_index=True)
             return True
 
         except Exception as e:
-            # 텔레그램 SOS로 보낼 에러 메시지 상세화
             print(f"❌ 2층 분석 실패 상세: {e}")
             raise ValueError(f"2층 사냥터 발굴 중 에러 발생: {str(e)}")
+            
     def build_and_save_report(self):
         """
         [원칙 1] 1+1-1=Complete
-        [수정] 지수 위치 이동, 섹션별 5개 출력, nan% 방어 로직 통합
+        [수정] 섹션별 독립 필터링 적용 (BEST 3개 + TEN-B 3개 강제 출력)
         """
         kst_now = datetime.utcnow() + timedelta(hours=9)
         file_name = f"V40_Integrated_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
         
-        # 1. [원칙 1] 분석 데이터를 엑셀로 먼저 저장 (파일 저장 전엔 절대 보고 안함)
+        # 1. [원칙 1] 분석 데이터를 엑셀로 저장 (생략 - 기존 로직 유지)
         try:
             with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
                 if not self.floor_1_df.empty:
@@ -291,13 +271,11 @@ class QuantumControlCenter:
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2층_신규발굴', index=False)
                 
-                # 매크로 정보 시트 저장
                 macro_data = pd.DataFrame([{
                     "V7_Energy": self.v7_p, "V8_Cash": self.v8_p, 
                     "Market_State": self.market_state, "Report_Time": kst_now
                 }])
                 macro_data.to_excel(writer, sheet_name='시스템_파동', index=False)
-            
             print(f"💾 [원칙 1] 데이터 저장 완료: {file_name}")
         except Exception as e:
             print(f"🚨 파일 저장 중 오류: {e}")
@@ -312,35 +290,34 @@ class QuantumControlCenter:
         report += f"📢 상태: {self.market_state}\n\n"
         
         report += "🏢 [1층 보유주 진단]\n"
-        for _, r in self.floor_1_df.iterrows():
-            report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
+        if not self.floor_1_df.empty:
+            for _, r in self.floor_1_df.iterrows():
+                report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
             
         report += "\n🧬 [2층 신규 사냥터]\n"
         
-        # --- [지수 라인: 형님 요청대로 2층 상단 배치] ---
-        # nan%가 뜨지 않도록 getattr로 안전하게 호출
-        nbi_txt = getattr(self, 'indices_report', "🧬 지수 정보를 불러오는 중입니다...").split('\n')[0] if hasattr(self, 'indices_report') else "🧬 NBI: 연결 확인 필요"
-        ngx_txt = getattr(self, 'indices_report', "").split('\n')[1] if hasattr(self, 'indices_report') and '\n' in self.indices_report else "🚀 NGX: 연결 확인 필요"
-        
-        # nan% 방어: 만약 문자열에 nan이 포함되어 있으면 깔끔하게 처리
-        if 'nan' in nbi_txt: nbi_txt = nbi_txt.replace('nan', '0.0')
-        if 'nan' in ngx_txt: ngx_txt = ngx_txt.replace('nan', '0.0')
-        
-        report += f"{nbi_txt}\n{ngx_txt}\n\n"
+        # --- [지수 라인] ---
+        # 지수 정보가 없으면 "연결 확인 필요"라고 명시적으로 띄움
+        indices = getattr(self, 'indices_report', "🧬 NBI: 연결 확인 필요\n🚀 NGX: 연결 확인 필요")
+        # nan 방어
+        indices = indices.replace('nan', '0.0')
+        report += f"{indices}\n\n"
 
-        # --- [추천주 출력: BEST 5개 + TEN-B 5개] ---
+        # --- [추천주 출력: 섹션별 독립 필터링] ---
         if not self.floor_2_df.empty:
-            # 1. BEST 섹션 (최대 5개)
-            best_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('BEST')].head(5)
-            for _, r in best_list.iterrows():
-                report += f"🎯 BEST {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
-            
-            report += "\n" # 섹션 간 줄바꿈
+            # 1. BEST 섹션 (전체 데이터 중 BEST 글자가 있는 것만 골라서 상위 3개)
+            # .head(5)에서 전체가 잘리는 문제를 방지하기 위해 필터링 후 head 적용
+            best_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('BEST', na=False)].sort_values(by='V_Energy', ascending=False).head(3)
+            if not best_list.empty:
+                for _, r in best_list.iterrows():
+                    report += f"🎯 BEST {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
+                report += "\n"
 
-            # 2. TEN-B 섹션 (최대 5개)
-            ten_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('TEN-B')].head(5)
-            for _, r in ten_list.iterrows():
-                report += f"🚀 TEN-B {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
+            # 2. TEN-B 섹션 (전체 데이터 중 TEN-B 글자가 있는 것만 골라서 상위 3개)
+            ten_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('TEN-B', na=False)].sort_values(by='V_Energy', ascending=False).head(3)
+            if not ten_list.empty:
+                for _, r in ten_list.iterrows():
+                    report += f"🚀 TEN-B {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
         
         self.analysis_report = report
         return file_name
