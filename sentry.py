@@ -111,13 +111,18 @@ class QuantumControlCenter:
 
             # 실시간 나스닥 바이오(^NBI) / 넥스트젠 100(^NGX) 추세 가산점
             try:
-                sentinels = yf.download(['^NBI', '^NGX'], period='1mo', progress=False)['Close']
-                if not sentinels.empty and len(sentinels) >= 20:
-                    for ticker in ['^NBI', '^NGX']:
-                        curr = sentinels[ticker].iloc[-1]
-                        ma20 = sentinels[ticker].rolling(20).mean().iloc[-1]
-                        if curr > ma20:
-                            self.v8_p -= 5.0 # 시장이 강하면 현금 비중 축소
+                sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False)['Close']
+                if not sentinels.empty:
+                    # 형님 보시게 변수에 저장 (새로 추가)
+                    self.nbi_val = sentinels['^NBI'].iloc[-1]
+                    self.ngx_val = sentinels['^NGX'].iloc[-1]
+                    
+                    # 등락률 계산
+                    nbi_change = (self.nbi_val / sentinels['^NBI'].iloc[-2] - 1) * 100
+                    ngx_change = (self.ngx_val / sentinels['^NGX'].iloc[-2] - 1) * 100
+                    self.indices_report = f"🧬 NBI: {self.nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {self.ngx_val:,.2f} ({ngx_change:+.1f}%)"
+                    
+                    # (기존 가산점 로직 유지...)
                 
                 # 가산점 적용 후 다시 무결성 체크
                 self.v8_p = max(5.0, min(95.0, self.v8_p))
@@ -291,6 +296,7 @@ class QuantumControlCenter:
         
         report = f"{title}\n\n"
         report += f"📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
+        report += f"{self.indices_report}\n"  # <--- 이 줄이 추가되어야 형님 폰에 뜹니다!
         report += f"📢 상태: {self.market_state}\n\n"
         
         report += "🏢 [1층 보유주 진단]\n"
