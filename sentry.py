@@ -242,74 +242,74 @@ class QuantumControlCenter:
     # [3단계] 2층 12개 타겟 무결성 사냥
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-        """
-        [공정 3] 13시간의 대장정 종결 - 무차별 데이터 해체 및 3333 강제 복원
-        """
-        logging.info("공정 3: 형님 실데이터 관상 기반 무차별 해체 가동...")
-        
-        # 각 섹션별 '진짜 관상' 정의 (형님 스니펫 100% 반영)
-        configs = [
-            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
-            {"title": "🎯 [BEST]", "key": "BEST", "score": "V_Energy", "id": "Ticker"},
-            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
-            {"title": "🤖 [BNAI]", "key": "BNAI", "score": "V_Energy", "id": "Date"}
-        ]
-        
-        all_targets = []
-        import os
-        files = [f for f in os.listdir('.') if f.endswith('.csv')]
+    """
+    [공정 3] 파일 검색 로직 강화 - 형님의 파일을 절대 놓치지 않음
+    """
+    logging.info("공정 3: 2층 타겟 무결성 복구 및 정밀 해체 시작...")
+    
+    configs = [
+        {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
+        {"title": "🎯 [BEST]", "key": "BEST", "score": "V_Energy", "id": "Ticker"},
+        {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
+        {"title": "🤖 [BNAI]", "key": "BNAI", "score": "V_Energy", "id": "Date"}
+    ]
+    
+    # 현재 경로의 모든 파일 리스트 확보
+    files = [f for f in os.listdir('.') if f.lower().endswith(('.csv', '.xlsx'))]
+    all_targets = []
 
-        for cfg in configs:
-            try:
-                target_df = None
-                # 1. 파일 전수 조사 (파일명 키워드 매칭)
-                for f in files:
-                    if cfg['key'] in f:
-                        df = pd.read_csv(f, encoding='utf-8-sig')
-                        if cfg['score'] in df.columns:
-                            target_df = df.copy()
-                            break
+    for cfg in configs:
+        try:
+            target_df = None
+            # 파일명 매칭 지능화: 대소문자 무시 및 부분 일치 검색
+            for f in files:
+                if cfg['key'].lower() in f.lower():
+                    # self.load_resource는 형님의 파일 구조(Symbol, Ticker 등)를 자동 매핑함
+                    target_df = self.load_resource(f)
+                    if target_df is not None:
+                        logging.info(f"✅ {cfg['title']} 소스 발견: {f}")
+                        break
+            
+            if target_df is None or target_df.empty:
+                self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
+                continue
+
+            # 수치 무결성 확보: 콤마 제거, 에러 시 0 처리 후 실수 변환
+            # TIRX(48,438,050.3) -> 48438050.3 대응
+            target_df['Clean_Score'] = pd.to_numeric(
+                target_df[cfg['score']].astype(str).str.replace(',', '').str.strip(), 
+                errors='coerce'
+            ).fillna(0)
+            
+            # 정렬 후 상위 3개 추출 (BNAI는 시계열이므로 최하단 3개가 최신)
+            if "BNAI" in cfg['title']:
+                top3 = target_df.tail(3).iloc[::-1] # 최신 데이터가 위로 오게 반전
+            else:
+                top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
+            
+            res = []
+            for _, row in top3.iterrows():
+                # ID 추출 (Symbol/Ticker/Date 중 존재하는 것)
+                s = str(row.get(cfg['id'], "ERR")).strip()
+                # 날짜 형식일 경우 뒤의 시간 제거 (가독성)
+                if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] 
                 
-                if target_df is None:
-                    self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
-                    continue
+                v = row['Clean_Score']
+                # 백만 단위 이상은 M으로 표기 (TIRX 48.4M)
+                f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
+                res.append(f"{s}({f_val})")
+                all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
+            
+            # 3개 미만일 경우 채우기
+            while len(res) < 3: res.append("⚠️ 타겟부재")
+            self.sections[cfg['title']] = res[:3]
 
-                # 2. 콤마 제거 및 수치 강제 변환 (TIRX 48,438,050.3 대응)
-                def force_num(x):
-                    try:
-                        val = str(x).replace(',', '').strip()
-                        return float(val)
-                    except: return 0.0
+        except Exception as e:
+            logging.error(f"🚨 {cfg['title']} 해체 실패: {str(e)}")
+            self.sections[cfg['title']] = ["❌ 데이터붕괴"] * 3
 
-                target_df['Clean_Score'] = target_df[cfg['score']].apply(force_num)
-
-                # 3. 3333 정렬 및 추출 (BNAI는 최신순, 나머지는 점수순)
-                if "BNAI" in cfg['title']:
-                    top3 = target_df.sort_index(ascending=False).head(3)
-                else:
-                    top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
-
-                res = []
-                for _, row in top3.iterrows():
-                    # ID 컬럼(Symbol/Ticker/Date) 추출
-                    s = str(row.get(cfg['id'], "TARGET")).strip()
-                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] # 날짜 가독성
-                    
-                    v = row['Clean_Score']
-                    # 수천만 점 M단위 가독성 (TIRX 48.4M)
-                    f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
-                    res.append(f"{s}({f_val})")
-                    all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
-                
-                while len(res) < 3: res.append("⚠️ 타겟부재")
-                self.sections[cfg['title']] = res[:3]
-
-            except Exception as e:
-                logging.error(f"🚨 {cfg['title']} 해체 실패: {str(e)}")
-                self.sections[cfg['title']] = ["❌ 데이터붕괴"] * 3
-
-        self.floor_2_df = pd.DataFrame(all_targets)
-        return True
+    self.floor_2_df = pd.DataFrame(all_targets)
+    return True
         
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
