@@ -243,66 +243,62 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 13시간의 대장정 종결 - 무차별 데이터 해체 및 3333 강제 복원
-        들여쓰기 및 구문 오류 전수 교정 완료. TIRX 48.4M 무결성 보장.
+        [공정 3] 데이터 무결성 완전 복구 - 컬럼명 매칭 결함 해결
         """
         logging.info("공정 3: 2층 타겟 무결성 정밀 해체 가동...")
         
-        # 각 섹션별 데이터 관상 정의 (오타 수정 완료)
         configs = [
-            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score": "V_Energy", "id": "Symbol"},
-            {"title": "🎯 [BEST]", "key": "BEST", "score": "V_Energy", "id": "Ticker"},
-            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score": "Q_Score", "id": "Symbol"},
-            {"title": "🤖 [BNAI]", "key": "BNAI", "score": "V_Energy", "id": "Date"}
+            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Symbol", "종목"]},
+            {"title": "🎯 [BEST]", "key": "BEST", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Ticker", "Symbol"]},
+            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score_keys": ["Q_Score", "Energy", "점수"], "id_keys": ["Symbol", "Ticker"]},
+            {"title": "🤖 [BNAI]", "key": "BNAI", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Date", "날짜"]}
         ]
         
         all_targets = []
         import os
-        # 현재 경로의 모든 CSV/XLSX 파일 확보
         files = [f for f in os.listdir('.') if f.lower().endswith(('.csv', '.xlsx'))]
 
         for cfg in configs:
             try:
                 target_df = None
-                # 1. 파일명 지능형 매칭 (대소문자 무시)
                 for f in files:
                     if cfg['key'].lower() in f.lower():
-                        target_df = self.load_resource(f)
-                        if target_df is not None: 
-                            logging.info(f"✅ {cfg['title']} 소스 매칭 성공: {f}")
-                            break
+                        # 파일 로드 시 컬럼명을 강제로 바꾸지 않는 안전 모드
+                        target_df = self.load_resource(f) 
+                        if target_df is not None: break
                 
                 if target_df is None or target_df.empty:
                     self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
                     continue
 
-                # 2. 수치 무결성 강제 확보 (콤마 제거 및 float 변환)
-                # TIRX(48,438,050.3) 같은 데이터를 48438050.3으로 강제 전환
+                # 컬럼명 유연화: 정의된 후보 중 실제 존재하는 컬럼 찾기
+                score_col = next((c for c in target_df.columns if any(k in c for k in cfg['score_keys'])), None)
+                id_col = next((c for c in target_df.columns if any(k in c for k in cfg['id_keys'])), target_df.columns[0])
+
+                if not score_col:
+                    raise KeyError(f"점수 컬럼 실종 (후보: {cfg['score_keys']})")
+
+                # 수치 무결성 강제 확보 (TIRX 48.4M 대응)
                 target_df['Clean_Score'] = pd.to_numeric(
-                    target_df[cfg['score']].astype(str).str.replace(',', '').str.strip(), 
+                    target_df[score_col].astype(str).str.replace(',', '').str.strip(), 
                     errors='coerce'
                 ).fillna(0)
 
-                # 3. 3333 정렬 및 추출 (BNAI는 최신순, 나머지는 점수순)
                 if "BNAI" in cfg['title']:
-                    top3 = target_df.tail(3).iloc[::-1] # 최신 3개
+                    top3 = target_df.tail(3).iloc[::-1]
                 else:
                     top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
 
                 res = []
                 for _, row in top3.iterrows():
-                    # ID 컬럼(Symbol, Ticker, Date) 추출
-                    s = str(row.get(cfg['id'], "TARGET")).strip()
-                    # 날짜 형식 가독성 보정
+                    s = str(row.get(id_col, "TARGET")).strip()
                     if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] 
                     
                     v = row['Clean_Score']
-                    # 수천만 점 M단위 가독성 보정 (예: 48,438,050 -> 48.4M)
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
                     all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
                 
-                # 결과 무결성 보존 (항상 3개 유지)
                 while len(res) < 3: res.append("⚠️ 타겟부재")
                 self.sections[cfg['title']] = res[:3]
 
