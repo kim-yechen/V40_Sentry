@@ -65,29 +65,69 @@ class QuantumControlCenter:
         return True
 
     def calculate_macro_spectrum(self):
-        """[V40 최종 무결성] 데이터 수치를 조작하지 않고, 비중(0.58)을 절대값으로 사용"""
+        """[V40 하이브리드] NBI(바이오) + NG100(넥스트젠) 지수를 반영한 정밀 판정"""
+        print("🔭 매크로 정찰병 투입 중 (NBI + NG100 관측)...")
         try:
+            # 1. 기존 파일 데이터 로드 (형님 데이터 무결성 유지)
             v7_df = self._smart_file_loader("KIM_DIRECTOR_V7_HYBRID_FINAL.xlsx")
             v8_df = self._smart_file_loader("KIM_DIRECTOR_V8_RECESSION_ALERT.xlsx")
             
-            v7_raw = v7_df['V_Energy'].iloc[-1]           # 713.77
-            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 0.5858 (58.5%)
+            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 예: 0.58
             
-            # [핵심] 0.58이라는 숫자를 58%로 바로 인정합니다.
-            # V8 비중은 파일에 적힌 그대로 가져오고, 나머지를 V7로 채웁니다.
-            self.v8_p = v8_raw * 100  # 결과: 58.5%
-            self.v7_p = 100 - self.v8_p # 결과: 41.5%
+            # 기본 비중 설정 (파일 값 그대로 1차 인정)
+            self.v8_p = v8_raw * 100 
+            self.v7_p = 100 - self.v8_p 
+
+            # ------------------------------------------------------------------
+            # [신규 추가] 2. 나스닥 바이오(^NBI) & 넥스트젠 100(^NGX) 실시간 분석
+            # ------------------------------------------------------------------
+            try:
+                # 데이터 수집 (최근 1개월)
+                sentinels = yf.download(['^NBI', '^NGX'], period='1mo', progress=False)['Close']
+                
+                if not sentinels.empty and len(sentinels) > 20:
+                    # NBI 추세 확인 (현재가 vs 20일 평균)
+                    nbi_curr = sentinels['^NBI'].iloc[-1]
+                    nbi_ma20 = sentinels['^NBI'].rolling(20).mean().iloc[-1]
+                    
+                    # NG100 추세 확인
+                    ngx_curr = sentinels['^NGX'].iloc[-1]
+                    ngx_ma20 = sentinels['^NGX'].rolling(20).mean().iloc[-1]
+                    
+                    # 시장 야성(Risk-On) 부스트 점수 계산
+                    boost = 0
+                    if nbi_curr > nbi_ma20: boost += 5  # 바이오가 평균 위에 있으면 +5% 공세
+                    if ngx_curr > ngx_ma20: boost += 5  # 넥스트젠이 평균 위에 있으면 +5% 공세
+                    
+                    # [원칙 2: Negative Check] 
+                    # 야성이 확인되면 현금(V8) 비중을 줄이고 주식(V7)을 그만큼 늘림
+                    prev_v8 = self.v8_p
+                    self.v8_p = max(0, self.v8_p - boost)
+                    self.v7_p = 100 - self.v8_p
+                    
+                    if boost > 0:
+                        print(f"✅ 야성 지표 포착: 현금 비중 {prev_v8:.1f}% -> {self.v8_p:.1f}%로 하향 (공격력 강화)")
             
-            # 쏠림 감지 판정
-            if v8_raw > 0.5:
-                self.market_state = "🚨 [⚠️쏠림형 강세] 대형주 독식 / 개별주 피빨림"
-                if self.v8_p < 60: # 쏠림장일 땐 리스크를 더 엄격하게 (최소 60% 확보)
-                    self.v8_p = 60.0
-                    self.v7_p = 40.0
+            except Exception as e_sentinel:
+                print(f"⚠️ 지수 실시간 조회 실패 (기본값 유지): {e_sentinel}")
+            # ------------------------------------------------------------------
+
+            # 3. 최종 상태 판정
+            if self.v8_p > 60:
+                self.market_state = "🚨 [수비 강화] 현금 비중 압도적 유지"
+            elif self.v8_p > 50:
+                self.market_state = "⚖️ [쏠림형 강세] 대형주 위주 관망"
             else:
-                self.market_state = "🔥 V7 정상 파동 (적극 공략)"
-            
+                self.market_state = "🔥 [적극 공략] 중소형주/바이오 탄력 구간"
+
+            # [원칙 2] 쏠림장 강제 보정 로직 유지
+            if v8_raw > 0.6: 
+                 if self.v8_p < 60:
+                     self.v8_p = 60.0
+                     self.v7_p = 40.0
+
             return True
+
         except Exception as e:
             print(f"❌ 분석 실패: {e}")
             return False
