@@ -243,9 +243,9 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 2층 4개 섹션 정밀 발굴 (형님 엑셀 구조 완벽 대응 버전)
+        [공정 3] 2층 4개 섹션 정밀 발굴 (Duplicate Labels 및 인덱스 붕괴 완벽 방어)
         """
-        logging.info("공정 3: 2층 데이터 복원 및 원형 보존 가동...")
+        logging.info("공정 3: 2층 데이터 복원 가동 (중복 라벨 방어 모드)...")
         job_list = [
             ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT", ['V_Energy', 'Energy']),
             ("🎯 [BEST]", "V40_BEST_TARGETS", ['V_Energy', 'Energy']),
@@ -256,43 +256,37 @@ class QuantumControlCenter:
         all_targets = []
         for title, file, score_cols in job_list:
             try:
-                df = self.load_resource(file)
-                if df is None or df.empty:
-                    self.sections[title] = ["❌ 파일없음"] * 3
+                raw_df = self.load_resource(file)
+                if raw_df is None or raw_df.empty:
+                    self.sections[title] = ["❌ 파일부재"] * 3
                     continue
 
-                # 1. 컬럼명 보정 (종목명)
-                sym_col = 'Symbol' if 'Symbol' in df.columns else ('Ticker' if 'Ticker' in df.columns else df.columns[0])
+                # [수선] 중복 컬럼 및 인덱스 초기화 (에러 원천 차단)
+                df = raw_df.loc[:, ~raw_df.columns.duplicated()].copy() # 중복 컬럼 제거
+                df = df.reset_index(drop=True) # 인덱스 강제 초기화
+
+                # 1. 컬럼 매핑 (형님 엑셀 관상 분석)
+                sym_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['symbol', 'ticker', '종목'])), df.columns[0])
+                score_col = next((c for c in df.columns if any(x in str(c).lower() for x in score_cols)), df.columns[1])
+
+                # 2. 데이터 청소 (콤마 제거 및 수치화)
+                def clean_val(x):
+                    try: return float(str(x).replace(',', '').strip())
+                    except: return 0.0
+
+                df['Clean_Score'] = df[score_col].apply(clean_num)
                 
-                # 2. 컬럼명 보정 (점수)
-                energy_col = None
-                for col in score_cols:
-                    if col in df.columns:
-                        energy_col = col
-                        break
-                if not energy_col: energy_col = df.columns[1]
+                # 3. 최신 데이터 추출 (BNAI 등 날짜 겹침 방지)
+                if title == "🤖 [BNAI]":
+                    df = df.sort_index().tail(1)
 
-                # 3. 데이터 정제 (콤마 제거 및 최신 데이터 추출)
-                working_df = df.copy()
-                if title == "🤖 [BNAI]": # BNAI는 가장 최신 날짜 데이터 사용
-                    working_df = working_df.tail(1)
-
-                def clean_num(val):
-                    try:
-                        return float(str(val).replace(',', '').strip())
-                    except:
-                        return 0.0
-
-                working_df['Clean_Score'] = working_df[energy_col].apply(clean_num)
-                
-                # 4. 상위 3개 추출
-                top3 = working_df.sort_values(by='Clean_Score', ascending=False).head(3)
+                # 4. 상위 3개 선발 (3333 원칙)
+                top3 = df.sort_values(by='Clean_Score', ascending=False).head(3)
                 
                 res = []
                 for _, row in top3.iterrows():
                     sym = str(row[sym_col]).strip()
                     val = row['Clean_Score']
-                    # 수천만 단위 가독성 처리
                     f_val = f"{val/1000000:.1f}M" if val >= 1000000 else f"{val:,.1f}"
                     res.append(f"{sym}({f_val})")
                     all_targets.append({"Section": title, "Symbol": sym, "Energy": val})
@@ -301,12 +295,12 @@ class QuantumControlCenter:
                 self.sections[title] = res[:3]
                 
             except Exception as e:
-                logging.error(f"🚨 {title} 복원 실패: {str(e)}")
-                self.sections[title] = ["❌ 데이터오류"] * 3
+                logging.error(f"🚨 {title} 섹션 복구 실패: {str(e)}")
+                self.sections[title] = ["❌ 데이터모순"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
-
+        
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
