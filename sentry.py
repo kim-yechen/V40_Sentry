@@ -354,26 +354,20 @@ class QuantumControlCenter:
             if report_file:
                 self.send_telegram(report_file) # 전송
             print("🏁 모든 공정 완료.")
+        
         except Exception as e:
-            
             # [원칙 3 준수] 에러 발생 시 즉시 형님께 SOS 텔레그램 발송
+            print(f"🚨 공정 중단: {e}")
             error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 이 부분 로직이 모순되거나 파일이 꼬였습니다. 수정 부탁드립니다!"
-        try:
-            # 기존 텔레그램 전송 로직 재활용
-            self.send_telegram_text(error_msg) 
-        except:
-            print(f"🚨 텔레그램 발송 실패... 콘솔 에러 확인: {e}")
             
-            report_file = self.build_and_save_report()
-            if report_file:
-                self.send_telegram(report_file)
-            
-            print("🏁 모든 공정 완료.")
-        except Exception as e:
-            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 수식이나 파일 확인 부탁드립니다!"
-            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                         json={"chat_id": self.chat_id, "text": error_msg})
-            print(f"\n🚨 에러 보고 완료: {e}")
+            # 복잡하게 try-except 또 쓰지 말고, 안전하게 한 줄로 발송 시도
+            if hasattr(self, 'send_telegram_text'):
+                self.send_telegram_text(error_msg)
+            else:
+                # 만약 함수가 없으면 API 직접 호출 (가장 확실한 방법)
+                url = f"https://api.telegram.org/bot{self.t_token}/sendMessage"
+                import requests
+                requests.post(url, json={"chat_id": self.chat_id, "text": error_msg}, timeout=5)
 
 # --- 여기서부터는 클래스 밖입니다 ---
 if __name__ == "__main__":
