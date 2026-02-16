@@ -109,20 +109,21 @@ class QuantumControlCenter:
             self.v8_p = v8_raw * 100 if v8_raw <= 1.0 else v8_raw
             self.v7_p = 100 - self.v8_p 
 
-            # 실시간 나스닥 바이오(^NBI) / 넥스트젠 100(^NGX) 추세 가산점
-            try:
-                sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False)['Close']
-                if not sentinels.empty:
-                    # 형님 보시게 변수에 저장 (새로 추가)
-                    self.nbi_val = sentinels['^NBI'].iloc[-1]
-                    self.ngx_val = sentinels['^NGX'].iloc[-1]
-                    
-                    # 등락률 계산
-                    nbi_change = (self.nbi_val / sentinels['^NBI'].iloc[-2] - 1) * 100
-                    ngx_change = (self.ngx_val / sentinels['^NGX'].iloc[-2] - 1) * 100
-                    self.indices_report = f"🧬 NBI: {nbi_val:,.2f} ({nbi_change:+.1f}%)\n🚀 NGX: {ngx_val:,.2f} ({ngx_change:+.1f}%)"
-                    
-                    # (기존 가산점 로직 유지...)
+            # [수정] 지수 호출 및 변수 저장 확실하게!
+        try:
+            sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False)['Close']
+            if not sentinels.empty and len(sentinels) >= 2:
+                nbi_v = sentinels['^NBI'].iloc[-1]
+                ngx_v = sentinels['^NGX'].iloc[-1]
+                nbi_c = (nbi_v / sentinels['^NBI'].iloc[-2] - 1) * 100
+                ngx_c = (ngx_v / sentinels['^NGX'].iloc[-2] - 1) * 100
+                
+                # 리포트에서 쓸 변수명을 'indices_report'로 통일
+                self.indices_report = f"🧬 NBI: {nbi_v:,.2f} ({nbi_c:+.1f}%)\n🚀 NGX: {ngx_v:,.2f} ({ngx_c:+.1f}%)"
+            else:
+                self.indices_report = "🧬 NBI: 데이터 수신 대기\n🚀 NGX: 데이터 수신 대기"
+        except Exception as e:
+            self.indices_report = "🧬 NBI: 연결 지연(확인요망)\n🚀 NGX: 연결 지연(확인요망)"
                 
                 # 가산점 적용 후 다시 무결성 체크
                 self.v8_p = max(5.0, min(95.0, self.v8_p))
