@@ -277,49 +277,66 @@ class QuantumControlCenter:
             print(f"❌ 2층 분석 실패: {e}")
             return False
 
-        # 2. 텔레그램용 리포트 텍스트 빌드
-        weekday = kst_now.weekday()
-        title = "📅 [V40 주초 개장상황 보고]" if weekday == 0 else "📊 [V40 주간 결산 보고]" if weekday == 5 else "👹 [V40 일일 관제 보고]"
-        
-        report = f"{title}\n\n"
-        report += f"📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
-        report += f"📢 상태: {self.market_state}\n\n"
-        
-        report += "🏢 [1층 보유주 진단]\n"
-        if not self.floor_1_df.empty:
-            for _, r in self.floor_1_df.iterrows():
-                report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
+    def build_and_save_report(self):
+        """
+        [최종 무결성] 4단계: 12개 타겟 통합 및 엑셀 저장
+        """
+        print("📊 [Step 4] 통합 리포트 생성 및 엑셀 저장 중...")
+        try:
+            kst_now = datetime.utcnow() + timedelta(hours=9)
+            file_name = f"V40_Integrated_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
             
-        report += f"\n🧬 [2층 신규 사냥터]\n"
-        
-        # --- [지수 라인: 상단 배치 및 nan 방어] ---
-        indices = getattr(self, 'indices_report', "🧬 NBI: 수신 대기\n🚀 NGX: 수신 대기")
-        indices = indices.replace('nan', '0.0')
-        report += f"{indices}\n\n"
+            # 1. 엑셀 저장 (원칙 1: 1+1-1=Complete)
+            with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
+                if not self.floor_1_df.empty:
+                    self.floor_1_df.to_excel(writer, sheet_name='1층_보유점검', index=False)
+                if not self.floor_2_df.empty:
+                    self.floor_2_df.to_excel(writer, sheet_name='2층_신규발굴', index=False)
+            
+            print(f"💾 [원칙 1] 저장 완료: {file_name}")
 
-        # --- [BEST 출력: 부족하면 이유 보고] ---
-        report += f"🎯 [BEST TARGETS] {getattr(self, 'best_summary', '')}\n"
-        for i in range(3):
-            if hasattr(self, 'best_targets_list') and i < len(self.best_targets_list):
-                r = self.best_targets_list.iloc[i]
-                report += f"  {i+1}. {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
-            else:
-                report += f"  {i+1}. ⚠️ [타겟 부재] 기준 만족 종목 없음\n"
+            # 2. 텔레그램용 리포트 텍스트 빌드 (4개 섹션 x 3개 = 12개 무결성)
+            weekday = kst_now.weekday()
+            title = "📅 [V40 주초 개장상황 보고]" if weekday == 0 else "📊 [V40 주간 결산 보고]" if weekday == 5 else "👹 [V40 일일 관제 보고]"
+            
+            report = f"{title}\n\n"
+            report += f"📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
+            report += f"📢 상태: {self.market_state}\n\n"
+            
+            report += "🏢 [1층 보유주 진단]\n"
+            if not self.floor_1_df.empty:
+                for _, r in self.floor_1_df.iterrows():
+                    report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
+            
+            report += f"\n🧬 [2층 신규 사냥터 타겟]\n"
+            sections = [
+                ("🛡️ [SHIELD]", getattr(self, 's1_shield', pd.DataFrame())),
+                ("🎯 [BEST TARGETS]", getattr(self, 's2_best', pd.DataFrame())),
+                ("🚀 [TEN-BAGGER]", getattr(self, 's3_tenb', pd.DataFrame())),
+                ("🤖 [BNAI SPECIAL]", getattr(self, 's4_bnai', pd.DataFrame()))
+            ]
 
-        # --- [TEN-B 출력: 부족하면 이유 보고] ---
-        report += f"\n🚀 [TEN-BAGGER] {getattr(self, 'ten_summary', '')}\n"
-        for i in range(3):
-            if hasattr(self, 'ten_targets_list') and i < len(self.ten_targets_list):
-                r = self.ten_targets_list.iloc[i]
-                # 에너지(점수) 컬럼 추출 안전장치
-                score = r.get('Q_Score', r.get('V_Energy', 0))
-                report += f"  {i+1}. {r['Symbol']} | E:{score:,.1f}\n"
-            else:
-                report += f"  {i+1}. ⚠️ [타겟 부재] 기준 만족 종목 없음\n"
+            for s_title, df in sections:
+                report += f"\n{s_title}\n"
+                for i in range(3):
+                    if not df.empty and i < len(df):
+                        r = df.iloc[i]
+                        # 에너지 값 추출 (V_Energy 없으면 Q_Score 시도)
+                        energy = r.get('V_Energy', r.get('Q_Score', 0))
+                        report += f"  {i+1}. {r['Symbol']} | E:{energy:,.1f}\n"
+                    else:
+                        report += f"  {i+1}. ⚠️ [타겟 부재]\n"
 
-        # 최종 리포트 저장 및 반환
-        self.analysis_report = report
-        return file_name # 여기서 모든 공정 종료
+            # 지수 정보 추가
+            indices = getattr(self, 'indices_report', "🧬 NBI: 수신 대기\n🚀 NGX: 수신 대기")
+            report += f"\n---\n{indices.replace('nan', '0.0')}"
+
+            self.analysis_report = report
+            return file_name
+
+        except Exception as e:
+            print(f"🚨 리포트 생성 중 치명적 오류: {e}")
+            return None
 
     def send_telegram(self, file_path):
         """[수정본] 초록불이든 빨간불이든, 형님께 보고는 무조건 합니다."""
