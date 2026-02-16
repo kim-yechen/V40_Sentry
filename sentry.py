@@ -212,6 +212,66 @@ class QuantumControlCenter:
             return False
 
     def floor_2_hunting(self):
+        """
+        [무결성 검증] 3단계: 2층 신규 타켓 발굴
+        - Buy 신호 엄격 필터링 + 부족 시 사유 기록 + 엑셀 저장용 병합
+        """
+        print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
+        try:
+            # 1. 파일 로드
+            v40_best = self._smart_file_loader("V40_BEST_TARGETS")
+            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837")
+            
+            self.best_summary = ""
+            self.ten_summary = ""
+            combined_for_excel = [] # 엑셀 저장을 위한 리스트
+
+            # --- [섹션 1: BEST TARGETS 필터링] ---
+            status_col = [c for c in v40_best.columns if 'Status' in c or 'Decision' in c or '결정' in c]
+            if status_col:
+                # Buy 신호만 필터링 (대소문자 구분 없이)
+                best_buys = v40_best[v40_best[status_col[0]].str.contains('Buy', na=False, case=False)].copy()
+                self.best_targets_list = best_buys.sort_values(by='V_Energy', ascending=False).head(3)
+                self.best_summary = f"({len(best_buys)}개 Buy 신호 포착)"
+                
+                if not self.best_targets_list.empty:
+                    temp_best = self.best_targets_list.copy()
+                    temp_best['Source'] = '🎯 BEST'
+                    combined_for_excel.append(temp_best)
+            else:
+                self.best_targets_list = pd.DataFrame()
+                self.best_summary = "(Status 컬럼 누락)"
+
+            # --- [섹션 2: TEN-BAGGER 필터링] ---
+            status_col_ten = [c for c in v40_ten.columns if 'Status' in c or 'Decision' in c or '결정' in c]
+            if status_col_ten:
+                ten_buys = v40_ten[v40_ten[status_col_ten[0]].str.contains('Buy', na=False, case=False)].copy()
+                # 에너지 컬럼 유연하게 대응
+                e_col_ten = 'Q_Score' if 'Q_Score' in v40_ten.columns else [c for c in v40_ten.columns if 'Score' in c or '점수' in c][0]
+                self.ten_targets_list = ten_buys.sort_values(by=e_col_ten, ascending=False).head(3)
+                self.ten_summary = f"({len(ten_buys)}개 Buy 신호 포착)"
+                
+                if not self.ten_targets_list.empty:
+                    temp_ten = self.ten_targets_list.copy()
+                    temp_ten['Source'] = '🚀 TEN-B'
+                    combined_for_excel.append(temp_ten)
+            else:
+                self.ten_targets_list = pd.DataFrame()
+                self.ten_summary = "(Status 컬럼 누락)"
+
+            # --- [섹션 3: 원칙 1 준수 - 엑셀 저장용 데이터 통합] ---
+            if combined_for_excel:
+                self.floor_2_df = pd.concat(combined_for_excel, ignore_index=True)
+            else:
+                # Buy 신호가 하나도 없을 경우 빈 데이터프레임이라도 생성 (저장 에러 방지)
+                self.floor_2_df = pd.DataFrame(columns=['Symbol', 'V_Energy', 'Source'])
+
+            return True
+
+        except Exception as e:
+            print(f"❌ 2층 분석 실패: {e}")
+            return Falsedef floor_2_hunting(self):
+            
         print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
         try:
             v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
@@ -258,17 +318,17 @@ class QuantumControlCenter:
     def build_and_save_report(self):
         """
         [원칙 1] 1+1-1=Complete
-        [수정] 섹션별 독립 필터링 적용 (BEST 3개 + TEN-B 3개 강제 출력)
+        [수정] 중복 코드 제거 및 리턴 위치 정상화 (부족 시 사유 보고 포함)
         """
         kst_now = datetime.utcnow() + timedelta(hours=9)
         file_name = f"V40_Integrated_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
         
-        # 1. [원칙 1] 분석 데이터를 엑셀로 저장 (생략 - 기존 로직 유지)
+        # 1. [원칙 1] 분석 데이터를 엑셀로 저장 (파일 저장이 최우선)
         try:
             with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
                 if not self.floor_1_df.empty:
                     self.floor_1_df.to_excel(writer, sheet_name='1층_보유점검', index=False)
-                if not self.floor_2_df.empty:
+                if hasattr(self, 'floor_2_df') and not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2층_신규발굴', index=False)
                 
                 macro_data = pd.DataFrame([{
@@ -294,33 +354,36 @@ class QuantumControlCenter:
             for _, r in self.floor_1_df.iterrows():
                 report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
             
-        report += "\n🧬 [2층 신규 사냥터]\n"
+        report += f"\n🧬 [2층 신규 사냥터]\n"
         
-        # --- [지수 라인] ---
-        # 지수 정보가 없으면 "연결 확인 필요"라고 명시적으로 띄움
-        indices = getattr(self, 'indices_report', "🧬 NBI: 연결 확인 필요\n🚀 NGX: 연결 확인 필요")
-        # nan 방어
+        # --- [지수 라인: 상단 배치 및 nan 방어] ---
+        indices = getattr(self, 'indices_report', "🧬 NBI: 수신 대기\n🚀 NGX: 수신 대기")
         indices = indices.replace('nan', '0.0')
         report += f"{indices}\n\n"
 
-        # --- [추천주 출력: 섹션별 독립 필터링] ---
-        if not self.floor_2_df.empty:
-            # 1. BEST 섹션 (전체 데이터 중 BEST 글자가 있는 것만 골라서 상위 3개)
-            # .head(5)에서 전체가 잘리는 문제를 방지하기 위해 필터링 후 head 적용
-            best_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('BEST', na=False)].sort_values(by='V_Energy', ascending=False).head(3)
-            if not best_list.empty:
-                for _, r in best_list.iterrows():
-                    report += f"🎯 BEST {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
-                report += "\n"
+        # --- [BEST 출력: 부족하면 이유 보고] ---
+        report += f"🎯 [BEST TARGETS] {getattr(self, 'best_summary', '')}\n"
+        for i in range(3):
+            if hasattr(self, 'best_targets_list') and i < len(self.best_targets_list):
+                r = self.best_targets_list.iloc[i]
+                report += f"  {i+1}. {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
+            else:
+                report += f"  {i+1}. ⚠️ [타겟 부재] 기준 만족 종목 없음\n"
 
-            # 2. TEN-B 섹션 (전체 데이터 중 TEN-B 글자가 있는 것만 골라서 상위 3개)
-            ten_list = self.floor_2_df[self.floor_2_df['Source'].str.contains('TEN-B', na=False)].sort_values(by='V_Energy', ascending=False).head(3)
-            if not ten_list.empty:
-                for _, r in ten_list.iterrows():
-                    report += f"🚀 TEN-B {r['Symbol']} | E:{r['V_Energy']:,.1f}\n"
-        
+        # --- [TEN-B 출력: 부족하면 이유 보고] ---
+        report += f"\n🚀 [TEN-BAGGER] {getattr(self, 'ten_summary', '')}\n"
+        for i in range(3):
+            if hasattr(self, 'ten_targets_list') and i < len(self.ten_targets_list):
+                r = self.ten_targets_list.iloc[i]
+                # 에너지(점수) 컬럼 추출 안전장치
+                score = r.get('Q_Score', r.get('V_Energy', 0))
+                report += f"  {i+1}. {r['Symbol']} | E:{score:,.1f}\n"
+            else:
+                report += f"  {i+1}. ⚠️ [타겟 부재] 기준 만족 종목 없음\n"
+
+        # 최종 리포트 저장 및 반환
         self.analysis_report = report
-        return file_name
+        return file_name # 여기서 모든 공정 종료
 
     def send_telegram(self, file_path):
         """[수정본] 초록불이든 빨간불이든, 형님께 보고는 무조건 합니다."""
