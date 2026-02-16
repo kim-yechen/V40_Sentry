@@ -243,53 +243,59 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 형님이 업로드하신 7개 파일 기반 '무결성 3333' 강제 복구
+        [공정 3] 파일명 자동 매칭 및 데이터 원형 복원 (Final Integrity)
         """
-        logging.info("공정 3: 형님 업로드 파일 실명 기반 정밀 추출 시작...")
+        logging.info("공정 3: 형님 업로드 파일 자동 매칭 및 3333 추출 시작...")
         
-        # [실제 파일명 매핑] 형님이 주신 파일 이름과 100% 일치시켰습니다.
-        job_config = [
-            ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT.xlsx - 세부지표.csv", "Symbol", "V_Energy"),
-            ("🎯 [BEST]", "V40_BEST_TARGETS.xlsx - Sheet1.csv", "Ticker", "V_Energy"),
-            ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837.xlsx - Sheet1.csv", "Symbol", "Q_Score"),
-            ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL.xlsx - Sheet1.csv", "Date", "V_Energy")
-        ]
+        # [검거 타겟 설정]
+        targets_config = {
+            "🛡️ [SHIELD]": {"file_key": "COMMODITY_ANALYSIS_REPORT", "score": "V_Energy", "sym": "Symbol"},
+            "🎯 [BEST]": {"file_key": "V40_BEST_TARGETS", "score": "V_Energy", "sym": "Ticker"},
+            "🚀 [TEN-B]": {"file_key": "V40_TEN_BAGGER_REPORT_0837", "score": "Q_Score", "sym": "Symbol"},
+            "🤖 [BNAI]": {"file_key": "V7_RESULT_BNAI_FINAL", "score": "V_Energy", "sym": "Date"}
+        }
         
         all_targets = []
-        for title, real_file, sym_col, energy_col in job_config:
+        # 현재 폴더의 모든 파일 목록 확보
+        current_files = os.listdir('.')
+
+        for title, cfg in targets_config.items():
             try:
-                if not os.path.exists(real_file):
-                    logging.error(f"❌ {title}: {real_file} 찾을 수 없음")
+                # 1. 파일 자동 검거 (파일명에 키워드가 포함된 가장 적절한 파일 선택)
+                matched_file = next((f for f in current_files if cfg['file_key'] in f and f.endswith('.csv')), None)
+                
+                if not matched_file:
                     self.sections[title] = ["❌ 파일실종"] * 3
                     continue
                 
-                # 형님 데이터는 utf-8-sig 인코딩입니다.
-                df = pd.read_csv(real_file, encoding='utf-8-sig')
-                
-                # 수치 데이터 정제 (콤마 제거 로직)
-                def parse_val(v):
-                    try: return float(str(v).replace(',', '').strip())
+                # 2. 데이터 로드 및 중복 제거
+                df = pd.read_csv(matched_file, encoding='utf-8-sig')
+                df = df.loc[:, ~df.columns.duplicated()].copy()
+                df = df.dropna(subset=[cfg['score']]).reset_index(drop=True)
+
+                # 3. 수치 정제 (수천만 점 콤마 완벽 제거)
+                def force_float(x):
+                    try: return float(str(x).replace(',', '').strip())
                     except: return 0.0
 
-                df['Clean_Energy'] = df[energy_col].apply(parse_val)
+                df['Clean_Score'] = df[cfg['score']].apply(force_float)
 
-                # 섹션별 특화 추출
-                if title == "🤖 [BNAI]":
-                    # BNAI는 가장 하단(최신 날짜) 데이터 3개를 가져옵니다.
-                    target_rows = df.tail(3).sort_values(by='Clean_Energy', ascending=False)
-                    # BNAI는 Symbol 컬럼이 없어서 날짜를 Symbol 자리에 임시 배치하거나 
-                    # 형님 원칙대로 'BNAI'로 고정 노출 가능합니다.
-                    display_sym = "BNAI_DATE" 
+                # 4. 상위 3개 선발 (BNAI는 최신순, 나머지는 점수순)
+                if "BNAI" in title:
+                    # BNAI는 날짜 기준 최하단 3개 중 점수 높은 순
+                    target_rows = df.tail(10).sort_values(by='Clean_Score', ascending=False).head(3)
+                    # BNAI는 날짜를 종목명 대신 노출
+                    sym_name = cfg['sym']
                 else:
-                    target_rows = df.sort_values(by='Clean_Energy', ascending=False).head(3)
+                    target_rows = df.sort_values(by='Clean_Score', ascending=False).head(3)
 
                 res = []
                 for _, row in target_rows.iterrows():
-                    # Symbol 컬럼이 없으면 Ticker 혹은 날짜 사용
-                    s = str(row.get(sym_col, "TARGET")).strip()
-                    v = row['Clean_Energy']
+                    s = str(row.get(cfg['sym'], "TARGET")).strip()
+                    # 날짜 형식인 경우 월/일만 추출
+                    if "-" in s and len(s) > 8: s = s.split(' ')[0][-5:]
                     
-                    # 4,800만 점 가독성 처리 (M단위)
+                    v = row['Clean_Score']
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
                     all_targets.append({"Section": title, "Symbol": s, "Energy": v})
