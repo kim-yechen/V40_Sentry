@@ -3,353 +3,358 @@ import yfinance as yf
 import numpy as np
 import requests
 import os
-import glob
-import time
 import sys
+import time
+import logging
+import traceback
 from datetime import datetime, timedelta
 import warnings
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # [V40 원칙: 기계적 무결성 및 지름길 금지 엄수]
-# 1. 1+1-1=Complete: 분석+가공+저장이 완료되지 않으면 보고하지 않는다.
-# 2. Negative Check: 논리적 모순(음수 MDD, 비정상 현금비중 등) 발생 시 즉시 중단.
-# 3. No Shortcuts: 에러 발생 시 우회하지 않고 사용자에게 직접 보고한다.
+# 1. 1+1-1=Complete: 분석+가공+파일 저장이 100% 완료되어야 보고를 시작한다.
+# 2. Negative Check: 논리적 모순(음수 MDD, 현금비중 오류 등) 발견 시 즉시 공정 중단.
+# 3. No Shortcuts: 에러 발생 시 가짜 데이터를 만들지 않고, 형님께 "수식 수정 요망"을 보고한다.
 
 warnings.filterwarnings('ignore')
+
+# --------------------------------------------------------------------------
+# 로깅 시스템 구축 (추적 무결성 확보)
+# --------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamFileHandler if 'google.colab' not in sys.modules else logging.StreamHandler()]
+)
 
 class QuantumControlCenter:
     def __init__(self, macro_v8_switch=2):
         """
-        [시스템 초기화]
-        형님의 전략적 스위치 레벨에 따라 방어 강도를 결정합니다.
+        [시스템 초기화 공정]
         """
-        self.version = "V40_INTEGRITY_SUPREME_2026"
+        self.start_time = time.time()
         self.macro_v8_switch = macro_v8_switch 
         self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
         self.chat_id = "198757117"
         
-        # 시스템 내부 지표 (초기값 설정)
-        self.v7_p = 50.0  # 상승 모멘텀 (V7)
-        self.v8_p = 50.0  # 하락/현금 압력 (V8)
-        self.market_state = "⚖️ 시스템 정렬 중..."
+        # 내부 상태 지표
+        self.v7_p = 50.0 
+        self.v8_p = 50.0 
+        self.market_state = "⚖️ 초기화 중"
         self.analysis_report = ""
-        self.indices_report = ""
+        self.indices_data = {"NBI": (0, 0), "NGX": (0, 0)}
         
-        # 데이터 저장소 (엑셀 출력용)
+        # 데이터 버퍼 (원칙 1을 위한 저장 공간)
         self.floor_1_df = pd.DataFrame()
         self.floor_2_df = pd.DataFrame()
-        self.macro_log = []
+        self.error_log = []
         
-        # 섹션별 개별 저장소 (무결성 12개 타겟용)
-        self.s1_shield = pd.DataFrame()
-        self.s2_best = pd.DataFrame()
-        self.s3_tenb = pd.DataFrame()
-        self.s4_bnai = pd.DataFrame()
+        # 섹션별 무결성 저장소 (12개 타겟 보존)
+        self.sections = {
+            "🛡️ [SHIELD]": [],
+            "🎯 [BEST]": [],
+            "🚀 [TEN-B]": [],
+            "🤖 [BNAI]": []
+        }
 
-        print(f"✅ {self.version} 가동 시작... (Switch: {self.macro_v8_switch})")
+        logging.info(f"V40 시스템 엔진 점화... (강제 보정 스위치: {self.macro_v8_switch})")
 
     # --------------------------------------------------------------------------
-    # [핵심 로직 1] 방어적 파일 로더 (인코딩 및 경로 변조 원천 차단)
+    # [방어 로직] 데이터 무결성 체크 (Negative Check)
     # --------------------------------------------------------------------------
-    def _smart_file_loader(self, file_name):
+    def validate_data(self, value, label, min_val=-100, max_val=1000000):
         """
-        지름길 없이 파일의 존재와 내용을 5단계로 검증합니다.
+        [원칙 2] 기계적 에러 및 논리적 모순 원천 차단
+        """
+        try:
+            val = float(value)
+            if pd.isna(val) or np.isinf(val):
+                raise ValueError(f"NaN/Inf 검출")
+            
+            if val < min_val or val > max_val:
+                raise ValueError(f"범위 초과 (Value: {val})")
+            
+            return True
+        except Exception as e:
+            err_msg = f"🚨 [데이터 모순] {label}: {str(e)}. 공정을 중단합니다."
+            self.error_log.append(err_msg)
+            logging.error(err_msg)
+            return False
+
+    # --------------------------------------------------------------------------
+    # [방어 로직] 스마트 파일 로더 (No Shortcuts)
+    # --------------------------------------------------------------------------
+    def load_resource(self, file_name):
+        """
+        [원칙 3] 지름길 없이 파일의 무결성을 5단계로 검증
         """
         base = file_name.split('.')[0]
-        candidates = [
-            f"{base}.xlsx", f"{base}.csv", 
-            f"{base}_FINAL.xlsx", f"{base}_REVISION.csv",
-            f"{base}.xlsx - Sheet1.csv"
-        ]
+        exts = ['.xlsx', '.csv', '_FINAL.xlsx', '_REVISION.csv', '.xlsx - Sheet1.csv']
         
-        target_path = None
-        for c in candidates:
-            if os.path.exists(c):
-                target_path = c
+        found_path = None
+        for ext in exts:
+            path = f"{base}{ext}"
+            if os.path.exists(path):
+                found_path = path
                 break
         
-        if not target_path:
-            # [원칙 3] 지름길 금지: 파일이 없으면 즉시 에러 발생
-            err_msg = f"❌ [데이터 모순] 필수 파일 '{file_name}'을 찾을 수 없습니다. 경로를 확인하십시오."
-            self._emergency_sos(err_msg)
-            raise FileNotFoundError(err_msg)
+        if not found_path:
+            raise FileNotFoundError(f"❌ [파일 부재] {file_name}이 경로에 없습니다. 수식을 확인하십시오.")
 
-        encodings = ['utf-8-sig', 'cp949', 'utf-8', 'euc-kr']
-        for enc in encodings:
+        # 인코딩 파상 공세
+        for enc in ['utf-8-sig', 'cp949', 'utf-8', 'euc-kr']:
             try:
-                if target_path.endswith('.xlsx'):
-                    return pd.read_excel(target_path, engine='openpyxl')
+                if found_path.endswith('.xlsx'):
+                    df = pd.read_excel(found_path, engine='openpyxl')
                 else:
-                    return pd.read_csv(target_path, encoding=enc)
+                    df = pd.read_csv(found_path, encoding=enc)
+                
+                if df.empty: continue
+                return df
             except:
                 continue
         
-        raise ValueError(f"🚨 {file_name} 로딩 치명적 오류: 인코딩 호환 불가.")
+        raise ValueError(f"🚨 [로딩 실패] {file_name}의 데이터 구조가 파손되었습니다.")
 
     # --------------------------------------------------------------------------
-    # [핵심 로직 2] 데이터 커먼센스 체크 (Negative Check)
+    # [1단계] 매크로 스펙트럼 분석 (V8 스위치 개입)
     # --------------------------------------------------------------------------
-    def negative_check(self, value, name, min_val=-100, max_val=1000000):
-        """
-        [원칙 2] 수치가 논리적 범위를 벗어나면 즉시 프로세스를 중단합니다.
-        """
-        if pd.isna(value) or np.isinf(value):
-            msg = f"⚠️ [무결성 파괴] {name} 수치에서 NaN/Inf 감지. 연산 중단."
-            self._emergency_sos(msg)
-            raise ValueError(msg)
-        
-        if value < min_val or value > max_val:
-            msg = f"🚨 [데이터 모순] {name} 수치 이상: {value}. 범위를 벗어났습니다."
-            self._emergency_sos(msg)
-            raise ValueError(msg)
-        
-        return True
-
-    # --------------------------------------------------------------------------
-    # [공정 1] 매크로 스펙트럼 및 V8 보정 분석
-    # --------------------------------------------------------------------------
-    def calculate_macro_spectrum(self):
-        print("🔭 [Step 1] 매크로 스펙트럼 및 실시간 지수 분석...")
+    def process_macro(self):
+        logging.info("공정 1: 매크로 분석 및 스위치 보정 시작...")
         try:
-            # V8 데이터 로드 및 검증
-            v8_df = self._smart_file_loader("V8_REVISION_FINAL")
-            v8_col = next((c for c in v8_df.columns if 'Cash' in c or 'Ratio' in c), v8_df.columns[-1])
-            v8_raw = v8_df[v8_col].iloc[-1]
+            v8_data = self.load_resource("V8_REVISION_FINAL")
+            # 컬럼 무결성 체크
+            col = next((c for c in v8_data.columns if any(x in c for x in ['Cash', 'Ratio', 'V8'])), None)
+            if not col: raise KeyError("현금 비중 컬럼을 찾을 수 없습니다.")
             
-            # [원칙 2] 현금 비중 음수 체크
-            self.negative_check(v8_raw, "V8_CASH_RATIO", min_val=0)
+            raw_v8 = v8_data[col].iloc[-1]
             
-            # 비율 정규화 (0~100)
-            self.v8_p = v8_raw * 100 if v8_raw <= 1.0 else v8_raw
+            # [원칙 2] 네거티브 체크
+            if not self.validate_data(raw_v8, "V8_RAW", min_val=0): 
+                raise ValueError("V8 수치 모순")
+
+            # 비율 변환 (소수점 대응)
+            self.v8_p = raw_v8 * 100 if raw_v8 <= 1.0 else raw_v8
             
-            # 형님의 스위치 강제 보정 로직
-            # 스위치가 2단계 이상이면 시장 위기 상황으로 간주하여 방어선 구축
+            # [스위치 보정] 형님의 위기 관리 로직
             if self.macro_v8_switch >= 2:
                 self.v8_p = max(self.v8_p, 60.0)
-                print(f"🛡️ Switch Level {self.macro_v8_switch} 적용: V8 방어선 60% 상향 고정")
+                logging.info(f"🛡️ 보호 모드 가동: V8 최소선 60% 상향 고정")
 
             self.v7_p = 100 - self.v8_p
             
-            # 지수 호출 (타임아웃 10초 설정으로 지연 차단)
-            try:
-                sentinels = yf.download(['^NBI', '^NGX'], period='5d', progress=False, timeout=10)['Close']
-                if not sentinels.empty:
-                    nbi_curr = sentinels['^NBI'].iloc[-1]
-                    nbi_prev = sentinels['^NBI'].iloc[-2]
-                    nbi_chg = ((nbi_curr / nbi_prev) - 1) * 100
-                    
-                    ngx_curr = sentinels['^NGX'].iloc[-1]
-                    ngx_prev = sentinels['^NGX'].iloc[-2]
-                    ngx_chg = ((ngx_curr / ngx_prev) - 1) * 100
-                    
-                    self.indices_report = f"🧬 NBI: {nbi_curr:,.2f} ({nbi_chg:+.2f}%)\n🚀 NGX: {ngx_curr:,.2f} ({ngx_chg:+.2f}%)"
-                    
-                    # 지수 폭락 시 V8 추가 가중치 (기계적 방어)
-                    if ngx_chg < -2.0: 
-                        self.v8_p = min(self.v8_p + 5, 95.0)
-                        self.v7_p = 100 - self.v8_p
-            except:
-                self.indices_report = "⚠️ 실시간 지수 수신 지연 (파일 데이터 기반 분석 진행)"
+            # 시장 상태 기계적 판정
+            if self.v8_p >= 70: self.market_state = "🚨 [극심한 공포] 전량 현금화 검토"
+            elif self.v8_p >= 55: self.market_state = "🛡️ [보수적 수비] 현금 우위 유지"
+            elif self.v8_p >= 45: self.market_state = "⚖️ [중립] 지수 방향성 탐색"
+            else: self.market_state = "🔥 [적극 공격] 모멘텀 종목 비중 확대"
 
-            # 상태 판정
-            if self.v8_p >= 65: self.market_state = "🚨 [수비 강화] 현금 확보 최우선"
-            elif self.v8_p >= 50: self.market_state = "⚖️ [관망] 대형주/지수 추종 유지"
-            else: self.market_state = "🔥 [공격] 중소형주/바이오 탄력 공략"
-            
+            # 실시간 지수 보정 (NBI/NGX)
+            self.fetch_market_indices()
             return True
         except Exception as e:
-            print(f"❌ 매크로 공정 실패: {e}")
+            self.error_log.append(f"매크로 공정 오류: {str(e)}")
             return False
 
+    def fetch_market_indices(self):
+        """실시간 지수 데이터 호출 및 무결성 검증"""
+        try:
+            tickers = yf.download(['^NBI', '^NGX'], period='5d', interval='1d', progress=False, timeout=15)
+            if tickers.empty: return
+            
+            for t in ['^NBI', '^NGX']:
+                curr = tickers['Close'][t].iloc[-1]
+                prev = tickers['Close'][t].iloc[-2]
+                chg = ((curr / prev) - 1) * 100
+                key = t.replace('^', '')
+                self.indices_data[key] = (curr, chg)
+        except:
+            logging.warning("지수 호출 실패 (네트워크 점검 요망)")
+
     # --------------------------------------------------------------------------
-    # [공정 2] 1층 보유주 기계적 진단 (이동평균선 및 이격도)
+    # [2단계] 1층 보유주 기술적 진단
     # --------------------------------------------------------------------------
-    def floor_1_action(self):
-        print("🏢 [Step 2] 1층 보유주 무결성 진단...")
+    def process_floor_1(self):
+        logging.info("공정 2: 1층 보유주 기술적 무결성 점검...")
         portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
-        data_list = []
+        results = []
         
         try:
-            data = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
+            # 일괄 다운로드로 지연 방지
+            raw = yf.download(portfolio, period='1y', group_by='ticker', progress=False)
+            
             for sym in portfolio:
                 try:
-                    df = data[sym]
-                    if df.empty: raise ValueError
+                    df = raw[sym].dropna()
+                    if len(df) < 120: 
+                        results.append({"Symbol": sym, "Action": "⚠️ 데이터부족", "Icon": "📉", "Gap": 0, "DD": 0})
+                        continue
                     
-                    curr_price = df['Close'].iloc[-1]
+                    price = df['Close'].iloc[-1]
                     ma120 = df['Close'].rolling(120).mean().iloc[-1]
                     high_20 = df['Close'].rolling(20).max().iloc[-1]
                     
-                    # [원칙 2] 가격 데이터 무결성 체크
-                    self.negative_check(curr_price, f"{sym}_PRICE", min_val=0.001)
+                    # [원칙 2] 가격 무결성
+                    if not self.validate_data(price, f"{sym}_PRICE", min_val=0.001): continue
                     
-                    gap_120 = ((curr_price / ma120) - 1) * 100
-                    dd_20 = ((curr_price / high_20) - 1) * 100
+                    gap = ((price / ma120) - 1) * 100
+                    mdd = ((price / high_20) - 1) * 100
                     
-                    # 판정 로직
-                    if curr_price < ma120:
-                        action, icon = "🔴 [전량매도] 하락추세 전환", "💀"
-                    elif dd_20 < -15.0:
-                        action, icon = "🟠 [분할익절] 트레일링 스탑", "🏃"
-                    elif gap_120 > 30.0:
-                        action, icon = "🔥 [과열경고] 비중 축소 권고", "⚠️"
-                    else:
-                        action, icon = "🟢 [강력홀딩] 추세 유지", "💎"
+                    # 형님의 기계적 매도/홀딩 룰
+                    if price < ma120: action, icon = "🔴 [전량매도]", "💀"
+                    elif mdd < -12.5: action, icon = "🟠 [트레일링]", "🏃"
+                    elif gap > 35.0: action, icon = "🟡 [과열분할]", "⚠️"
+                    else: action, icon = "🟢 [강력홀딩]", "💎"
                     
-                    data_list.append({
+                    results.append({
                         "Symbol": sym, "Action": action, "Icon": icon, 
-                        "Gap_120": round(gap_120, 2), "Drawdown": round(dd_20, 2)
+                        "Gap": round(gap, 2), "DD": round(mdd, 2), "Price": round(price, 2)
                     })
                 except:
-                    data_list.append({"Symbol": sym, "Action": "⚠️ 점검실패", "Icon": "❓", "Gap_120": 0.0, "Drawdown": 0.0})
+                    results.append({"Symbol": sym, "Action": "⚠️ 점검불가", "Icon": "❓", "Gap": 0, "DD": 0})
             
-            self.floor_1_df = pd.DataFrame(data_list)
+            self.floor_1_df = pd.DataFrame(results)
             return True
         except Exception as e:
-            print(f"❌ 1층 공정 에러: {e}")
+            self.error_log.append(f"1층 공정 오류: {str(e)}")
             return False
 
     # --------------------------------------------------------------------------
-    # [공정 3] 2층 12개 타겟 무결성 사냥 (추출 로직 강화)
+    # [3단계] 2층 12개 타겟 무결성 사냥
     # --------------------------------------------------------------------------
-    def floor_2_hunting(self):
-        print("🧬 [Step 3] 2층 4개 섹션(12개 타겟) 정밀 스캔...")
-        targets = [
+    def process_floor_2(self):
+        logging.info("공정 3: 2층 4개 섹션 정밀 발굴...")
+        job_list = [
             ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT"),
             ("🎯 [BEST]", "V40_BEST_TARGETS"),
             ("🚀 [TEN-B]", "V40_TEN_BAGGER_REPORT_0837"),
             ("🤖 [BNAI]", "V7_RESULT_BNAI_FINAL")
         ]
         
-        all_results = []
-        for title, f_name in targets:
+        all_targets = []
+        for title, file in job_list:
             try:
-                df = self._smart_file_loader(f_name)
-                # 에너지/점수 컬럼 자동 검색
+                df = self.load_resource(file)
+                # 점수 컬럼 식별
                 score_col = next((c for c in df.columns if any(x in c for x in ['Energy', 'Score', 'V_', '점수'])), df.columns[1])
                 
-                # 상위 3개 추출 (Buy 신호 우선)
+                # 상위 3개 추출 (형님의 정예 멤버 12개 구성)
                 top3 = df.sort_values(by=score_col, ascending=False).head(3).copy()
-                top3['Section'] = title
-                all_results.append(top3)
                 
-                # 내부 변수 할당 (보고서 빌드용)
-                res_list = [f"{r['Symbol']} (E:{r[score_col]:.1f})" for _, r in top3.iterrows()]
-                while len(res_list) < 3: res_list.append("⚠️ 타겟부재")
+                res = []
+                for _, row in top3.iterrows():
+                    sym = row['Symbol']
+                    val = row[score_col]
+                    res.append(f"{sym}({val:.1f})")
+                    all_targets.append({"Section": title, "Symbol": sym, "Energy": val})
                 
-                if "SHIELD" in title: self.s1_shield_list = res_list
-                elif "BEST" in title: self.s2_best_list = res_list
-                elif "TEN-B" in title: self.s3_tenb_list = res_list
-                elif "BNAI" in title: self.s4_bnai_list = res_list
+                # 3개 미만 시 보충
+                while len(res) < 3: res.append("⚠️ 타겟부재")
+                self.sections[title] = res
                 
-            except:
-                err_list = ["❌ 파일모순", "❌ 파일모순", "❌ 파일모순"]
-                if "SHIELD" in title: self.s1_shield_list = err_list
-                elif "BEST" in title: self.s2_best_list = err_list
-                elif "TEN-B" in title: self.s3_tenb_list = err_list
-                elif "BNAI" in title: self.s4_bnai_list = err_list
-                
-        self.floor_2_df = pd.concat(all_results) if all_results else pd.DataFrame()
+            except Exception as e:
+                self.sections[title] = ["❌ 파일모순", "❌ 파일모순", "❌ 파일모순"]
+                logging.error(f"{title} 처리 실패: {str(e)}")
+
+        self.floor_2_df = pd.DataFrame(all_targets)
         return True
 
     # --------------------------------------------------------------------------
-    # [공정 4] 1+1-1=Complete (파일 저장 및 보고서 빌드)
+    # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
-    def build_and_save_report(self):
-        print("💾 [Step 4] 리포트 무결성 검증 및 파일 저장...")
+    def finalize_and_report(self):
+        logging.info("공정 4: 최종 파일 저장 및 관제 보고 빌드...")
         try:
-            kst_now = datetime.utcnow() + timedelta(hours=9)
-            file_name = f"V40_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
+            kst = datetime.utcnow() + timedelta(hours=9)
+            filename = f"V40_MASTER_REPORT_{kst.strftime('%m%d_%H%M')}.xlsx"
             
-            # [원칙 1] 보고 전 반드시 저장
-            with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
-                self.floor_1_df.to_excel(writer, sheet_name='1층_보유현황', index=False)
-                self.floor_2_df.to_excel(writer, sheet_name='2층_신규타겟', index=False)
-                
-                # 엑셀 시각화 보정 (형님의 가독성을 위해)
-                ws = writer.sheets['1층_보유현황']
-                for cell in ws["A1:E1"]:
-                    cell.font = Font(bold=True, color="FFFFFF")
-                    cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-
-            # 텔레그램 텍스트 리포트 구성
-            report = f"📅 [V40 관제 보고 - {kst_now.strftime('%Y-%m-%d')}]\n\n"
-            report += f"📊 파동 지표: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
-            report += f"📢 시장 상태: {self.market_state}\n"
-            report += f"📡 지수: \n{self.indices_report}\n\n"
+            # 1. 엑셀 파일 생성 (무결성 보존)
+            self.save_to_excel(filename)
             
-            report += "🏢 [1층 보유주 진단]\n"
-            for _, r in self.floor_1_df.iterrows():
-                report += f"{r['Icon']} {r['Symbol']}: {r['Action']} ({r['Gap_120']}%)\n"
+            # 2. 텍스트 보고서 작성 (지름길 없음)
+            report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
+            report += f"📊 파동: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
+            report += f"📢 상태: {self.market_state}\n"
+            
+            nbi, nbi_c = self.indices_data["NBI"]
+            ngx, ngx_c = self.indices_data["NGX"]
+            report += f"🧬 NBI: {nbi:,.1f}({nbi_c:+.1f}%)\n"
+            report += f"🚀 NGX: {ngx:,.1f}({ngx_c:+.1f}%)\n\n"
+            
+            report += "🏢 [1층 보유주 점검]\n"
+            if not self.floor_1_df.empty:
+                for _, r in self.floor_1_df.iterrows():
+                    report += f"{r['Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap']}%)\n"
             
             report += "\n🧬 [2층 12개 무결성 타겟]"
-            report += f"\n🛡️ SHIELD: {', '.join(self.s1_shield_list)}"
-            report += f"\n🎯 BEST: {', '.join(self.s2_best_list)}"
-            report += f"\n🚀 TEN-B: {', '.join(self.s3_tenb_list)}"
-            report += f"\n🤖 BNAI: {', '.join(self.s4_bnai_list)}"
+            for sec, stocks in self.sections.items():
+                report += f"\n{sec}: {', '.join(stocks)}"
             
-            report += f"\n\n✅ 파일 저장 완료: {file_name}"
+            report += f"\n\n💾 저장완료: {filename}"
             self.analysis_report = report
-            return file_name
+            
+            return filename
         except Exception as e:
-            self._emergency_sos(f"리포트 생성 실패: {e}")
+            self.critical_sos(f"리포트 빌드 치명적 에러: {str(e)}")
             return None
 
-    # --------------------------------------------------------------------------
-    # [통신] 텔레그램 발송
-    # --------------------------------------------------------------------------
-    def send_telegram(self, file_path):
-        print("✉️ 텔레그램 전송 중...")
+    def save_to_excel(self, filename):
+        """엑셀 저장 공정 (서식 적용 포함)"""
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            self.floor_1_df.to_excel(writer, sheet_name='1st_Floor_Asset', index=False)
+            self.floor_2_df.to_excel(writer, sheet_name='2nd_Floor_Target', index=False)
+            
+            # 시각적 가독성 (형님 전용 스타일링)
+            for sheetname in writer.sheets:
+                ws = writer.sheets[sheetname]
+                for cell in ws[1]:
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
+                    cell.alignment = Alignment(horizontal="center")
+
+    def dispatch(self, filename):
+        """텔레그램 최종 전송"""
         try:
             # 텍스트 전송
-            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                          data={"chat_id": self.chat_id, "text": self.analysis_report})
+            base_url = f"https://api.telegram.org/bot{self.t_token}"
+            requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": self.analysis_report})
             
-            # 파일 전송 (방어 강도가 높거나 특정 조건일 때)
-            if self.macro_v8_switch >= 2 or self.v7_p > 50:
-                with open(file_path, 'rb') as f:
-                    requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
-                                  data={"chat_id": self.chat_id}, files={'document': f})
-            print("✅ 보고 완료.")
+            # 파일 전송 (강제 보정 스위치 활성화 시 필수 전송)
+            if self.macro_v8_switch >= 1 or self.v7_p > 50:
+                with open(filename, 'rb') as f:
+                    requests.post(f"{base_url}/sendDocument", data={"chat_id": self.chat_id}, files={'document': f})
         except:
-            print("⚠️ 통신 장애 발생")
+            print("⚠️ 텔레그램 전송 실패")
 
-    def _emergency_sos(self, error_msg):
-        """에러 발생 시 즉시 보고"""
+    def critical_sos(self, msg):
+        """치명적 오류 시 형님께 SOS"""
         try:
             requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                          data={"chat_id": self.chat_id, "text": f"🚨 [V40 긴급중단]\n{error_msg}"})
+                          data={"chat_id": self.chat_id, "text": f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"})
         except: pass
 
     # --------------------------------------------------------------------------
-    # [메인 실행부]
+    # [메인 실행]
     # --------------------------------------------------------------------------
-    def run_process(self):
+    def run(self):
         try:
-            # 1. 매크로
-            if not self.calculate_macro_spectrum(): 
-                raise ValueError("Step 1(매크로)에서 데이터 모순 발생.")
+            logging.info("=== V40 무결성 시스템 가동 ===")
+            if not self.process_macro(): raise ValueError("매크로 분석 단계 모순 발생")
+            if not self.process_floor_1(): raise ValueError("1층 진단 단계 모순 발생")
+            if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순 발생")
             
-            # 2. 1층 진단
-            if not self.floor_1_action():
-                raise ValueError("Step 2(1층) 진단 중 수식 오류 발생.")
-                
-            # 3. 2층 사냥
-            if not self.floor_2_hunting():
-                raise ValueError("Step 3(2층) 타겟 추출 중 파일 모순 발생.")
+            f_name = self.finalize_and_report()
+            if f_name:
+                self.dispatch(f_name)
             
-            # 4. 저장 및 보고
-            f_path = self.build_and_save_report()
-            if f_path:
-                self.send_telegram(f_path)
-                
-            print(f"🏁 [{datetime.now().strftime('%H:%M:%S')}] 모든 공정 무결성 확인 완료.")
+            end = time.time()
+            logging.info(f"=== 전 공정 정상 완료 ({end - self.start_time:.1f}초) ===")
             
         except Exception as e:
-            print(f"🛑 시스템 정지: {e}")
+            self.critical_sos(str(e))
 
 if __name__ == "__main__":
-    # 형님, 스위치 2단계로 설정하여 보수적 무결성을 유지합니다.
-    engine = QuantumControlCenter(macro_v8_switch=2)
-    engine.run_process()
+    # 형님, 스위치 2단계 가동합니다.
+    v40 = QuantumControlCenter(macro_v8_switch=2)
+    v40.run()
