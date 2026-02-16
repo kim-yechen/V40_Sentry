@@ -404,13 +404,16 @@ class QuantumControlCenter:
                 self.send_telegram(report_file)
             
             print("🏁 모든 공정 완료.")
+            
         except Exception as e:
-            def run_process(self):
-        """[원칙 3 준수] 문제 발생 시 즉시 형님께 SOS"""
-        try:
-            if not self.calculate_macro_spectrum(): raise ValueError("매크로 분석 실패")
-            if not self.floor_1_action(): raise ValueError("1층 진단 실패")
-            if not self.floor_2_hunting(): raise ValueError("2층 발굴 실패")
+            # [원칙 3 준수] 에러 발생 시 즉시 형님께 SOS 텔레그램 발송
+            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 수식이나 파일 확인 부탁드립니다!"
+            try:
+                requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
+                             json={"chat_id": self.chat_id, "text": error_msg}, timeout=10)
+            except:
+                print("🚨 텔레그램 발송조차 실패했습니다.")
+            print(f"\n🚨 에러 보고 완료: {e}")
             
             report_file = self.build_and_save_report()
             if report_file:
