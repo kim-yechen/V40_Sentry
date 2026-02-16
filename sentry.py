@@ -243,11 +243,11 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 형님 업로드 파일 실명(Real Path) 강제 매핑 버전
+        [공정 3] 형님 업로드 파일 실명 경로 타격 (화장실 해방 버전)
         """
-        logging.info("공정 3: 형님 업로드 파일 실명 기반 정밀 추출...")
+        logging.info("공정 3: 시스템 경로 1:1 매핑 기반 3333 데이터 복구...")
         
-        # [실제 경로 타격] 시스템에 올라온 이름 토씨 하나 안 틀리고 박았습니다.
+        # [실명 매핑] 시스템에 찍힌 이름 토씨 하나 안 틀리고 그대로 박았습니다.
         job_config = [
             ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT.xlsx - 세부지표.csv", "Symbol", "V_Energy"),
             ("🎯 [BEST]", "V40_BEST_TARGETS.xlsx - Sheet1.csv", "Ticker", "V_Energy"),
@@ -256,21 +256,18 @@ class QuantumControlCenter:
         ]
         
         all_targets = []
-        for title, real_file, sym_col, energy_col in job_config:
+        for title, real_file, sym_col, score_col in job_config:
             try:
-                # 파일 존재 확인 로직 강화
                 if not os.path.exists(real_file):
-                    # 만약 이름이 또 바뀌었을 경우를 대비한 2차 검색 루프
-                    found = False
-                    for f in os.listdir('.'):
-                        if real_file.split(' - ')[0] in f and f.endswith('.csv'):
-                            real_file = f
-                            found = True
-                            break
-                    if not found:
+                    # 만약 이름이 또 틀렸다면 폴더 전체에서 '키워드'로 강제 검거
+                    keyword = real_file.split('.')[0]
+                    found_file = next((f for f in os.listdir('.') if keyword in f and f.endswith('.csv')), None)
+                    if not found_file:
                         self.sections[title] = ["❌ 파일실종"] * 3
                         continue
-                
+                    real_file = found_file
+
+                # 로딩 (utf-8-sig로 한글 무결성 확보)
                 df = pd.read_csv(real_file, encoding='utf-8-sig')
                 
                 # 수치 정제 (콤마 제거 로직)
@@ -278,20 +275,23 @@ class QuantumControlCenter:
                     try: return float(str(v).replace(',', '').strip())
                     except: return 0.0
 
-                df['Clean_Score'] = df[energy_col].apply(clean_v)
+                df['Clean_Energy'] = df[score_col].apply(clean_v)
 
-                # 상위 3개 선발
+                # 데이터 추출
                 if "BNAI" in title:
-                    # BNAI는 날짜 기준 최하단(최신) 데이터 사용
-                    top3 = df.tail(3).sort_values(by='Clean_Score', ascending=False)
+                    # BNAI는 최신 날짜순 정렬 후 상위 3개
+                    top3 = df.tail(3).sort_values(by='Clean_Energy', ascending=False)
                 else:
-                    top3 = df.sort_values(by='Clean_Score', ascending=False).head(3)
+                    top3 = df.sort_values(by='Clean_Energy', ascending=False).head(3)
 
                 res = []
                 for _, row in top3.iterrows():
                     s = str(row.get(sym_col, "TARGET")).strip()
-                    if "-" in s and len(s) > 10: s = s[:10] # 날짜 가독성
-                    v = row['Clean_Score']
+                    # 날짜 가독성 처리 (2026-02-16 -> 02-16)
+                    if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:]
+                    
+                    v = row['Clean_Energy']
+                    # 수천만 점 M 단위 변환 (TIRX 48.4M)
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
                     all_targets.append({"Section": title, "Symbol": s, "Energy": v})
@@ -300,8 +300,8 @@ class QuantumControlCenter:
                 self.sections[title] = res[:3]
 
             except Exception as e:
-                logging.error(f"🚨 {title} 치명적 오류: {str(e)}")
-                self.sections[title] = ["❌ 데이터오류"] * 3
+                logging.error(f"🚨 {title} 복원 실패: {str(e)}")
+                self.sections[title] = ["❌ 데이터붕괴"] * 3
 
         self.floor_2_df = pd.DataFrame(all_targets)
         return True
