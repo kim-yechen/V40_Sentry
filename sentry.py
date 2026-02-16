@@ -195,43 +195,68 @@ class QuantumControlCenter:
 
     def floor_2_hunting(self):
         """
-        3단계: 2층 신규 타겟 발굴
-        - Grade 필터링 및 텐배거 리포트 교차 검증
+        [전수조사 완료 버전] 3단계: 2층 신규 타겟 발굴
+        - 텐배거 리포트 인식 강화 및 컬럼명 유연성 확보
         """
         print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
         try:
-            # 3대 핵심 리포트 로드
+            # 1. 파일 로드 (파일명 패턴 대응 강화)
             v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
-            v40_best = self._smart_file_loader("V40_BEST_TARGETS.xlsx")
-            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837.xlsx")
+            v40_best = self._smart_file_loader("V40_BEST_TARGETS")
+            
+            # 텐배거 리포트: 0837 같은 숫자가 바뀌어도 찾을 수 있게 패턴 검색 권장 (여기선 일단 기존 파일명 유지하되 안전장치)
+            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837")
             
             combined = []
             
-            # 1. 원자재/채굴주 등급 필터 (Grade A 또는 Shield)
-            shield_targets = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].copy()
-            shield_targets['Source'] = '🛡️ Shield'
-            combined.append(shield_targets[['Symbol', 'V_Energy', 'Source']].head(3))
-            
-            # 2. BEST 타겟 (에너지 순위)
-            best_targets = v40_best.sort_values(by='V_Energy', ascending=False).head(3).copy()
-            if 'Ticker' in best_targets.columns:
-                best_targets = best_targets.rename(columns={'Ticker': 'Symbol'})
-            best_targets['Source'] = '🎯 BEST'
-            combined.append(best_targets[['Symbol', 'V_Energy', 'Source']])
-            
-            # 3. 텐배거 리포트 (Buy 상태)
-            ten_targets = v40_ten[v40_ten['Status'].str.contains('Buy|Buy-Ref', na=False)].head(3).copy()
-            if 'Q_Score' in ten_targets.columns:
-                ten_targets = ten_targets.rename(columns={'Q_Score': 'V_Energy'})
-            ten_targets['Source'] = '🚀 TEN-B'
-            combined.append(ten_targets[['Symbol', 'V_Energy', 'Source']])
-            
+            # --- [섹션 1: Shield/Grade A] ---
+            if 'Grade' in v7c.columns:
+                shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].copy()
+                if not shield.empty:
+                    shield['Source'] = '🛡️ Shield'
+                    # 에너지 컬럼명이 V_Energy인지 확인 후 삽입
+                    e_col = 'V_Energy' if 'V_Energy' in shield.columns else shield.columns[1]
+                    combined.append(shield[['Symbol', e_col, 'Source']].rename(columns={e_col: 'V_Energy'}).head(3))
+
+            # --- [섹션 2: BEST TARGETS] ---
+            if not v40_best.empty:
+                # 에너지 컬럼 유연하게 찾기
+                e_col = 'V_Energy' if 'V_Energy' in v40_best.columns else [c for c in v40_best.columns if 'Energy' in c or 'Score' in c][0]
+                best = v40_best.sort_values(by=e_col, ascending=False).head(3).copy()
+                s_col = 'Symbol' if 'Symbol' in best.columns else ('Ticker' if 'Ticker' in best.columns else best.columns[0])
+                best['Source'] = '🎯 BEST'
+                combined.append(best[[s_col, e_col, 'Source']].rename(columns={s_col: 'Symbol', e_col: 'V_Energy'}))
+
+            # --- [섹션 3: TEN-BAGGER (형님이 찝으신 부분)] ---
+            # Status 컬럼이 있는지, Buy 신호가 있는지 꼼꼼히 체크
+            status_col = [c for c in v40_ten.columns if 'Status' in c or '결정' in c]
+            if status_col:
+                ten_targets = v40_ten[v40_ten[status_col[0]].str.contains('Buy|Buy-Ref', na=False)].head(3).copy()
+                if not ten_targets.empty:
+                    # Q_Score가 없을 경우를 대비해 순위나 다른 점수라도 가져옴
+                    score_col = 'Q_Score' if 'Q_Score' in ten_targets.columns else [c for c in ten_targets.columns if 'Score' in c or '점수' in c][0]
+                    ten_targets = ten_targets.rename(columns={score_col: 'V_Energy'})
+                    
+                    # [원칙 2] 데이터 커먼센스 체크: 점수가 음수면 로직 에러로 간주
+                    for val in ten_targets['V_Energy']:
+                        self.negative_check(val, "텐배거_에너지", min_limit=-1)
+                        
+                    s_col = 'Symbol' if 'Symbol' in ten_targets.columns else 'Ticker'
+                    ten_targets['Source'] = '🚀 TEN-B'
+                    combined.append(ten_targets[[s_col, 'V_Energy', 'Source']].rename(columns={s_col: 'Symbol'}))
+
+            # --- [최종 병합] ---
+            if not combined:
+                # [원칙 3] 지름길 금지: 데이터가 없으면 없다고 보고
+                raise ValueError("🚨 모든 리포트에서 유효한 Buy 타겟을 찾지 못했습니다. 파일 내용을 확인하십시오.")
+
             self.floor_2_df = pd.concat(combined, ignore_index=True)
             return True
-        except Exception as e:
-            print(f"❌ 2층 분석 실패: {e}")
-            return False
 
+        except Exception as e:
+            # 텔레그램 SOS로 보낼 에러 메시지 상세화
+            print(f"❌ 2층 분석 실패 상세: {e}")
+            raise ValueError(f"2층 사냥터 발굴 중 에러 발생: {str(e)}")
     def build_and_save_report(self):
         """
         [원칙 1] 1+1-1=Complete
