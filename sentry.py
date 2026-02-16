@@ -4,314 +4,320 @@ import numpy as np
 import requests
 import os
 import glob
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 import warnings
+from openpyxl import Workbook
 
 # [V40 원칙: 기계적 무결성 및 지름길 금지]
 warnings.filterwarnings('ignore')
 
 class QuantumControlCenter:
-    def __init__(self, macro_v8_switch=0):
-        # 1. 초기 설정: 형님의 비상 스위치 및 텔레그램 토큰
-        self.macro_v8_switch = macro_v8_switch 
-        self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
-        self.chat_id = "198757117"
-        
-        # 2. 시스템 상태 변수 (파동 관측용)
-        self.v7_p = 50.0 # 상승 에너지
-        self.v8_p = 50.0 # 붕괴(현금) 압력
-        self.market_state = "⚖️ 시스템 초기화 중..."
-        self.analysis_report = ""
+    def __init__(self, macro_v8_switch=0):
+        """
+        초기화 단계: 시스템의 심장부 설정
+        - macro_v8_switch: 시장 위기 시 수동 개입 계수
+        """
+        self.macro_v8_switch = macro_v8_switch 
+        self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
+        self.chat_id = "198757117"
+        
+        # 시스템 내부 지표
+        self.v7_p = 50.0 # 상승(바이오/중소형) 에너지
+        self.v8_p = 50.0 # 하락(현금/방어) 압력
+        self.market_state = "⚖️ 시스템 초기화 중..."
+        self.analysis_report = ""
+        
+        # [원칙 1 준수] 파일 저장을 위한 버퍼
+        self.floor_1_df = pd.DataFrame()
+        self.floor_2_df = pd.DataFrame()
+        
+        print(f"🚀 V40 시스템 기동 (Switch Level: {self.macro_v8_switch})")
 
-    def _smart_file_loader(self, file_name):
-        """[방어 시스템] 인코딩(0x9d) 및 파일명 변조를 원천 차단하는 중장갑 로더"""
-        # 경로 후보군 생성 (원본, 엑셀->CSV 변환본, 순수 CSV)
-        base = file_name.split('.')[0]
-        candidates = [file_name, f"{base}.xlsx - Sheet1.csv", f"{base}.csv"]
-        
-        target_path = None
-        for c in candidates:
-            if os.path.exists(c):
-                target_path = c
-                break
-        
-        # 파일 부재 시 즉시 경고 (원칙 3: 지름길 금지)
-        if not target_path:
-            raise FileNotFoundError(f"❌ 필수 데이터 누락: {file_name}을 찾을 수 없습니다.")
+    def _smart_file_loader(self, file_name):
+        """
+        [방어 로직] 인코딩 지옥과 파일명 변조를 원천 차단하는 중장갑 로더
+        - 형님의 원본 데이터 무결성을 위해 5단계 로딩 시도
+        """
+        base = file_name.split('.')[0]
+        # 확장자 및 시트명 변조 대응 후보군
+        candidates = [
+            file_name, 
+            f"{base}.xlsx", 
+            f"{base}.csv", 
+            f"{base}.xlsx - Sheet1.csv",
+            f"{base}_FINAL.xlsx",
+            f"{base}_REVISION.csv"
+        ]
+        
+        target_path = None
+        for c in candidates:
+            if os.path.exists(c):
+                target_path = c
+                break
+        
+        if not target_path:
+            # [원칙 3] 지름길 금지: 파일 없으면 가짜 데이터 만들지 말고 즉시 보고 중단
+            raise FileNotFoundError(f"❌ 필수 데이터 누락: {file_name} 파일이 경로에 없습니다.")
 
-        # 인코딩 파상 공세 (한국어 엑셀 호환성 확보)
-        for encoding in ['utf-8-sig', 'cp949', 'utf-8', 'latin1']:
-            try:
-                if target_path.endswith('.xlsx') and "csv" not in target_path:
-                    return pd.read_excel(target_path)
-                return pd.read_csv(target_path, encoding=encoding)
-            except Exception:
-                continue
-        
-        # 최후의 수단: openpyxl 엔진 강제 구동
-        try:
-            return pd.read_excel(target_path, engine='openpyxl')
-        except:
-            raise ValueError(f"🚨 {file_name} 로딩 실패. 파일이 손상되었거나 잠겨있습니다.")
+        # 인코딩 파상 공세 (EUC-KR, CP949 등 모든 한국어 엑셀 변종 대응)
+        encodings = ['utf-8-sig', 'cp949', 'utf-8', 'latin1', 'euc-kr']
+        for enc in encodings:
+            try:
+                if target_path.endswith('.xlsx'):
+                    return pd.read_excel(target_path, engine='openpyxl')
+                return pd.read_csv(target_path, encoding=enc)
+            except Exception:
+                continue
+        
+        # 마지막 수단: 엔진 강제 지정
+        try:
+            return pd.read_excel(target_path, engine='openpyxl')
+        except Exception as e:
+            raise ValueError(f"🚨 {file_name} 로딩 치명적 실패: {e}")
 
-    def negative_check(self, df, col_name, threshold=-1000000):
-        """[원칙 2] 데이터 커먼센스 체크: 기계적 결함 감지"""
-        if df[col_name].isnull().any():
-            raise ValueError(f"⚠️ {col_name} 열에 결측치(NaN)가 포함되어 있습니다.")
-        
-        min_val = df[col_name].min()
-        if min_val < threshold:
-            raise ValueError(f"🚨 {col_name} 수치 오류: {min_val} (논리적 한계치 이탈)")
-        return True
+    def negative_check(self, value, name, min_limit=-100, max_limit=1000000):
+        """
+        [원칙 2] 데이터 커먼센스 체크
+        - MDD가 양수가 나오거나, 현금비중이 음수가 되는 '기계적 에러' 차단
+        """
+        if pd.isna(value):
+            raise ValueError(f"⚠️ {name} 수치에 NaN(결측치) 감지. 연산 불능.")
+        if value < min_limit or value > max_limit:
+            raise ValueError(f"🚨 {name} 수치 이상: {value} (논리적 범위를 벗어남)")
+        return True
 
-    def calculate_macro_spectrum(self):
-        """[V40 하이브리드] NBI(바이오) + NG100(넥스트젠) 지수를 반영한 정밀 판정"""
-        print("🔭 매크로 정찰병 투입 중 (NBI + NG100 관측)...")
-        try:
-            # 1. 기존 파일 데이터 로드 (형님 데이터 무결성 유지)
-            v7_df = self._smart_file_loader("V7_RESULT_BNAI_FINAL")
-            v8_df = self._smart_file_loader("V8_REVISION_FINAL")
-            
-            v8_raw = v8_df['Recommended_Cash_Ratio'].iloc[-1] # 예: 0.58
-            
-            # 기본 비중 설정 (파일 값 그대로 1차 인정)
-            self.v8_p = v8_raw * 100 
-            self.v7_p = 100 - self.v8_p 
+    def calculate_macro_spectrum(self):
+        """
+        1단계: 매크로 스펙트럼 분석
+        - NBI(바이오) + NG100(넥스트젠) 지수를 반영하여 V7, V8의 파동 계산
+        """
+        print("🔭 [Step 1] 매크로 정찰병 투입...")
+        try:
+            # 데이터 로드
+            v7_df = self._smart_file_loader("V7_RESULT_BNAI_FINAL")
+            v8_df = self._smart_file_loader("V8_REVISION_FINAL")
+            
+            # 컬럼명 유연성 확보 (형님의 원본 데이터 컬럼명 매칭)
+            v8_col = 'Recommended_Cash_Ratio' if 'Recommended_Cash_Ratio' in v8_df.columns else 'V8_NextGen_Cash'
+            v8_raw = v8_df[v8_col].iloc[-1]
+            
+            # [원칙 2] 현금 비중 검증
+            self.negative_check(v8_raw, "V8_RAW_DATA", min_limit=0)
+            
+            # 퍼센트 변환
+            self.v8_p = v8_raw * 100 if v8_raw <= 1.0 else v8_raw
+            self.v7_p = 100 - self.v8_p 
 
-            # ------------------------------------------------------------------
-            # [신규 추가] 2. 나스닥 바이오(^NBI) & 넥스트젠 100(^NGX) 실시간 분석
-            # ------------------------------------------------------------------
-            try:
-                # 데이터 수집 (최근 1개월)
-                sentinels = yf.download(['^NBI', '^NGX'], period='1mo', progress=False)['Close']
-                
-                if not sentinels.empty and len(sentinels) > 20:
-                    # NBI 추세 확인 (현재가 vs 20일 평균)
-                    nbi_curr = sentinels['^NBI'].iloc[-1]
-                    nbi_ma20 = sentinels['^NBI'].rolling(20).mean().iloc[-1]
-                    
-                    # NG100 추세 확인
-                    ngx_curr = sentinels['^NGX'].iloc[-1]
-                    ngx_ma20 = sentinels['^NGX'].rolling(20).mean().iloc[-1]
-                    
-                    # 시장 야성(Risk-On) 부스트 점수 계산
-                    boost = 0
-                    if nbi_curr > nbi_ma20: boost += 5  # 바이오가 평균 위에 있으면 +5% 공세
-                    if ngx_curr > ngx_ma20: boost += 5  # 넥스트젠이 평균 위에 있으면 +5% 공세
-                    
-                    # [원칙 2: Negative Check] 
-                    # 야성이 확인되면 현금(V8) 비중을 줄이고 주식(V7)을 그만큼 늘림
-                    prev_v8 = self.v8_p
-                    self.v8_p = max(0, self.v8_p - boost)
-                    self.v7_p = 100 - self.v8_p
-                    
-                    if boost > 0:
-                        print(f"✅ 야성 지표 포착: 현금 비중 {prev_v8:.1f}% -> {self.v8_p:.1f}%로 하향 (공격력 강화)")
-            
-            except Exception as e_sentinel:
-                print(f"⚠️ 지수 실시간 조회 실패 (기본값 유지): {e_sentinel}")
-            # ------------------------------------------------------------------
+            # 실시간 나스닥 바이오(^NBI) / 넥스트젠 100(^NGX) 추세 가산점
+            try:
+                sentinels = yf.download(['^NBI', '^NGX'], period='1mo', progress=False)['Close']
+                if not sentinels.empty and len(sentinels) >= 20:
+                    for ticker in ['^NBI', '^NGX']:
+                        curr = sentinels[ticker].iloc[-1]
+                        ma20 = sentinels[ticker].rolling(20).mean().iloc[-1]
+                        if curr > ma20:
+                            self.v8_p -= 5.0 # 시장이 강하면 현금 비중 축소
+                
+                # 가산점 적용 후 다시 무결성 체크
+                self.v8_p = max(5.0, min(95.0, self.v8_p))
+                self.v7_p = 100 - self.v8_p
+            except:
+                print("⚠️ 실시간 지수 호출 지연 - 기본 파일 데이터로 진행")
 
-            # 3. 최종 상태 판정
-            if self.v8_p > 60:
-                self.market_state = "🚨 [수비 강화] 현금 비중 압도적 유지"
-            elif self.v8_p > 50:
-                self.market_state = "⚖️ [쏠림형 강세] 대형주 위주 관망"
-            else:
-                self.market_state = "🔥 [적극 공략] 중소형주/바이오 탄력 구간"
+            # 상태 판정 (형님 텍스트 포맷 그대로)
+            if self.v8_p > 60:
+                self.market_state = "🚨 [수비 강화] 현금 비중 압도적 유지"
+            elif self.v8_p > 50:
+                self.market_state = "⚖️ [쏠림형 강세] 대형주 위주 관망"
+            else:
+                self.market_state = "🔥 [적극 공략] 중소형주/바이오 탄력 구간"
 
-            # [원칙 2] 쏠림장 강제 보정 로직 유지
-            if v8_raw > 0.6: 
-                 if self.v8_p < 60:
-                     self.v8_p = 60.0
-                     self.v7_p = 40.0
+            # 형님의 스위치 강제 보정 로직
+            if v8_raw > 0.6 and self.v8_p < 60:
+                self.v8_p, self.v7_p = 60.0, 40.0
 
-            return True
+            return True
+        except Exception as e:
+            print(f"❌ 매크로 분석 단계 실패: {e}")
+            return False
 
-        except Exception as e:
-            print(f"❌ 분석 실패: {e}")
-            return False
+    def floor_1_action(self):
+        """
+        2단계: 1층 보유주 관리
+        - 트레일링 스탑 및 동적 이격도 제한 적용
+        """
+        print("🏢 [Step 2] 1층 보유주 보유 여부 검진...")
+        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
+        data_list = []
+        
+        try:
+            # [원칙 3] 지름길 금지: 실시간 데이터 확보
+            data = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
+            
+            # 형님의 핵심 수식: 시장 압박(V8)에 따른 이격도 한계값 설정
+            dynamic_limit = max(0.2, 0.7 - (self.v8_p * 0.006)) 
+            
+            for sym in portfolio:
+                df = data[sym]
+                if df.empty: continue
+                
+                curr = df['Close'].iloc[-1]
+                ma120 = df['Close'].rolling(120).mean().iloc[-1]
+                recent_high = df['Close'].rolling(20).max().iloc[-1]
+                
+                # [원칙 2] 네거티브 체크: 현재가가 0 이하일 수 없음
+                self.negative_check(curr, f"{sym}_PRICE", min_limit=0.0001)
+                
+                drawdown = (curr / recent_high - 1) * 100
+                gap_120 = (curr / ma120 - 1) * 100
+                
+                # 판정 로직 (형님의 기준 엄수)
+                if curr < ma120:
+                    action, icon = "🔴 [전량매도] 120일선 붕괴", "💀"
+                elif drawdown < -12.0:
+                    action, icon = f"🟠 [트레일링 스탑] 고점대비 {drawdown:.1f}% 하락", "🏃"
+                elif (curr/ma120 - 1) > dynamic_limit:
+                    action, icon = f"🚨 과열권 진입 (비중 {int(self.v8_p)}% 축소)", "🔥"
+                else:
+                    action, icon = "🟢 강력 홀딩", "💎"
+                
+                data_list.append({
+                    "Symbol": sym, "Price": round(curr, 2), "Action": action, 
+                    "Status_Icon": icon, "Gap_120": round(gap_120, 1), "DD": round(drawdown, 1)
+                })
+            
+            self.floor_1_df = pd.DataFrame(data_list)
+            return True
+        except Exception as e:
+            print(f"❌ 1층 분석 실패: {e}")
+            return False
 
-    def floor_1_action(self):
-        """2단계: 1층 보유주 - 트레일링 스탑(Trailing Stop) 적용"""
-        print("🏢 2단계: 1층 보유주 정밀 진단 (트레일링 스탑 가동)...")
-        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
-        results = []
-        try:
-            data = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
-            dynamic_limit = max(0.2, 0.7 - (self.v8_p * 0.006)) # V8 높으면 이격도 허용치 축소
-            
-            for sym in portfolio:
-                df = data[sym]
-                if df.empty: continue
-                
-                curr = df['Close'].iloc[-1]
-                ma120 = df['Close'].rolling(120).mean().iloc[-1]
-                
-                # [신규 로직] 고점 대비 하락률 (MDD from 20-day High)
-                recent_high = df['Close'].rolling(20).max().iloc[-1]
-                drawdown = (curr / recent_high - 1) * 100
-                
-                # 판결 로직 (우선순위: 생존 > 익절 > 홀딩)
-                if curr < ma120:
-                    action, icon = "🔴 [전량매도] 120일선 붕괴", "💀"
-                elif drawdown < -12.0:
-                    # 120일선 위에 있더라도 고점 대비 12% 밀리면 기계적 탈출
-                    action, icon = f"🟠 [트레일링 스탑] 고점대비 {drawdown:.1f}% 하락", "🏃"
-                elif (curr/ma120 - 1) > dynamic_limit:
-                    action, icon = f"🚨 과열권 진입 (비중 {int(self.v8_p)}% 축소)", "🔥"
-                else:
-                    action, icon = "🟢 강력 홀딩", "💎"
-                
-                results.append(f"{icon} {sym}: {action} (DD: {drawdown:.1f}%)")
-            return "\n".join(results)
-        except Exception as e:
-            return f"⚠️ 1층 분석 오류: {e}"
+    def floor_2_hunting(self):
+        """
+        3단계: 2층 신규 타겟 발굴
+        - Grade 필터링 및 텐배거 리포트 교차 검증
+        """
+        print("🧬 [Step 3] 2층 신규 타겟 정밀 스캔...")
+        try:
+            # 3대 핵심 리포트 로드
+            v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
+            v40_best = self._smart_file_loader("V40_BEST_TARGETS.xlsx")
+            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837.xlsx")
+            
+            combined = []
+            
+            # 1. 원자재/채굴주 등급 필터 (Grade A 또는 Shield)
+            shield_targets = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].copy()
+            shield_targets['Source'] = '🛡️ Shield'
+            combined.append(shield_targets[['Symbol', 'V_Energy', 'Source']].head(3))
+            
+            # 2. BEST 타겟 (에너지 순위)
+            best_targets = v40_best.sort_values(by='V_Energy', ascending=False).head(3).copy()
+            if 'Ticker' in best_targets.columns:
+                best_targets = best_targets.rename(columns={'Ticker': 'Symbol'})
+            best_targets['Source'] = '🎯 BEST'
+            combined.append(best_targets[['Symbol', 'V_Energy', 'Source']])
+            
+            # 3. 텐배거 리포트 (Buy 상태)
+            ten_targets = v40_ten[v40_ten['Status'].str.contains('Buy|Buy-Ref', na=False)].head(3).copy()
+            if 'Q_Score' in ten_targets.columns:
+                ten_targets = ten_targets.rename(columns={'Q_Score': 'V_Energy'})
+            ten_targets['Source'] = '🚀 TEN-B'
+            combined.append(ten_targets[['Symbol', 'V_Energy', 'Source']])
+            
+            self.floor_2_df = pd.concat(combined, ignore_index=True)
+            return True
+        except Exception as e:
+            print(f"❌ 2층 분석 실패: {e}")
+            return False
 
-    def floor_2_hunting(self):
-        """3단계: 2층 신규 사냥터 (누락 방지 및 교차 검증)"""
-        print("🧬 3단계: 2층 신규 타겟 스캐닝...")
-        try:
-            # 모든 타겟 파일 로딩 (누락 없음)
-            v7c = self._smart_file_loader("COMMODITY_ANALYSIS_REPORT")
-            v40_best = self._smart_file_loader("V40_BEST_TARGETS.xlsx")
-            v40_ten = self._smart_file_loader("V40_TEN_BAGGER_REPORT_0837.xlsx")
-            
-            # 등급 필터링
-            v7c_shield = v7c[v7c['Grade'].str.contains('Shield|A', na=False)].head(2)
-            best_picks = v40_best.sort_values(by='V_Energy', ascending=False).head(2)
-            ten_baggers = v40_ten[v40_ten['Status'].str.contains('Buy', na=False)].head(3)
+    def build_and_save_report(self):
+        """
+        [원칙 1] 1+1-1=Complete
+        - 모든 분석 데이터를 엑셀로 먼저 저장한 후 리포트 텍스트 생성
+        """
+        kst_now = datetime.utcnow() + timedelta(hours=9)
+        file_name = f"V40_Integrated_Report_{kst_now.strftime('%m%d_%H%M')}.xlsx"
+        
+        # 1. 엑셀 파일 생성 및 시트별 저장
+        try:
+            with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
+                if not self.floor_1_df.empty:
+                    self.floor_1_df.to_excel(writer, sheet_name='1층_보유점검', index=False)
+                if not self.floor_2_df.empty:
+                    self.floor_2_df.to_excel(writer, sheet_name='2층_신규발굴', index=False)
+                
+                # 매크로 정보 시트
+                macro_data = pd.DataFrame([{
+                    "V7_Energy": self.v7_p, "V8_Cash": self.v8_p, 
+                    "Market_State": self.market_state, "Report_Time": kst_now
+                }])
+                macro_data.to_excel(writer, sheet_name='시스템_파동', index=False)
+            
+            print(f"💾 [원칙 1] 데이터 저장 완료: {file_name}")
+        except Exception as e:
+            print(f"🚨 파일 저장 중 오류: {e}")
+            return None
 
-            # 시장 상황(V7 vs V8)에 따른 추천 전략 분기
-            if self.v7_p > 60:
-                # 상승장: 텐배거 공격적 매수
-                msg = "\n".join([f"🚀 {r['Symbol']} | Q:{r['Q_Score']:.1f}" for _, r in ten_baggers.iterrows()])
-            else:
-                # 붕괴/혼조세: 방어적 채굴주 + 검증된 BEST 타겟
-                msg = "\n".join([f"⛏️ {r['Symbol']} | E:{r['V_Energy']:.1f}" for _, r in v7c_shield.iterrows()])
-                msg += "\n" + "\n".join([f"🎯 {r['Ticker']} | P:{r['Price']}" for _, r in best_picks.iterrows()])
-            
-            return msg
-        except Exception as e:
-            return f"🧬 2층 분석 오류: {e}"
+        # 2. 텔레그램용 리포트 텍스트 빌드
+        weekday = kst_now.weekday()
+        title = "📅 [V40 주초 개장상황 보고]" if weekday == 0 else "📊 [V40 주간 결산 보고]" if weekday == 5 else "👹 [V40 일일 관제 보고]"
+        
+        report = f"{title}\n\n"
+        report += f"📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
+        report += f"📢 상태: {self.market_state}\n\n"
+        
+        report += "🏢 [1층 보유주 진단]\n"
+        for _, r in self.floor_1_df.iterrows():
+            report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
+            
+        report += "\n🧬 [2층 신규 사냥터]\n"
+        if not self.floor_2_df.empty:
+            # 시장 상황에 따른 전략적 텍스트 출력
+            targets = self.floor_2_df.head(7)
+            for _, r in targets.iterrows():
+                report += f"{r['Source']} {r['Symbol']} | E:{r['V_Energy']:.1f}\n"
+        
+        self.analysis_report = report
+        return file_name
 
-    # [추가] 전임자 스타일 데이터 추출 엔진 (1층용)
-    # --- 1층 엔진: AttributeError 해결 및 데이터 복구 ---
-    def _get_floor_1_data(self):
-        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
-        data_list = []
-        try:
-            # 원칙 2 적용: yfinance 데이터 직접 추출
-            data = yf.download(portfolio, period="1y", group_by='ticker', progress=False)
-            for sym in portfolio:
-                df = data[sym]
-                if df.empty: continue
-                curr = df['Close'].iloc[-1]
-                ma120 = df['Close'].rolling(120).mean().iloc[-1]
-                gap = ((curr/ma120)-1)*100
-                # 전임자 판정 아이콘 및 로직
-                if curr < ma120: act, icon = "🔴 [전량매도] 120일선 붕괴", "💀"
-                elif gap > 60: act, icon = "🚨 과열권 (비중 축소)", "🔥"
-                else: act, icon = "🟢 강력 홀딩", "💎"
-                data_list.append({"Symbol": sym, "Price": round(curr, 2), "Action": act, "Status_Icon": icon, "Gap_120": round(gap, 1)})
-            return pd.DataFrame(data_list)
-        except:
-            return pd.DataFrame(columns=["Symbol", "Price", "Action", "Status_Icon", "Gap_120"])
+    def send_telegram(self, file_path):
+        """최종 보고 단계: 텍스트 및 파일 전송"""
+        try:
+            # 1. 텍스트 리포트 발송
+            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
+                         json={"chat_id": self.chat_id, "text": self.analysis_report})
+            
+            # 2. 주말(토요일) 보고 시에는 파일도 함께 전송
+            kst_now = datetime.utcnow() + timedelta(hours=9)
+            if kst_now.weekday() == 5 or self.macro_v8_switch == 9: # 스위치 9는 테스트용 강제 발송
+                with open(file_path, 'rb') as f:
+                    requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
+                                 data={'chat_id': self.chat_id, 'caption': "📊 V40 주간 데이터 무결성 검증본"}, 
+                                 files={'document': f})
+            print("✉️ 텔레그램 보고 완료")
+        except Exception as e:
+            print(f"❌ 보고 전송 장애: {e}")
 
-    # --- 2층 엔진: 텐배거 파일 누락 해결 및 텍스트와 100% 동기화 ---
-    def _get_floor_2_data(self):
-        combined = []
-        # 텍스트 리포트에서 사용하는 3개 파일을 동일하게 스캔
-        targets = [
-            ("COMMODITY_ANALYSIS_REPORT", "🛡️ Shield"),
-            ("V40_BEST_TARGETS.xlsx", "🎯 BEST"),
-            ("V40_TEN_BAGGER_REPORT_0837.xlsx", "🚀 TEN-B")
-        ]
-        
-        for file_name, tag in targets:
-            df = self._smart_file_loader(file_name)
-            if not df.empty:
-                # 텐배거 파일(Symbol, Q_Score)과 BEST파일(Ticker, V_Energy) 컬럼 통합
-                temp = df.copy()
-                if 'Ticker' in temp.columns: temp = temp.rename(columns={'Ticker': 'Symbol'})
-                if 'V_Energy' in temp.columns: temp = temp.rename(columns={'V_Energy': 'Accel_Score'})
-                if 'Q_Score' in temp.columns: temp = temp.rename(columns={'Q_Score': 'Accel_Score'})
-                
-                # 필수 컬럼만 추출하여 병합
-                cols = [c for c in ['Symbol', 'Price', 'Accel_Score'] if c in temp.columns]
-                subset = temp[cols].head(5)
-                subset['Risk_Tag'] = tag
-                combined.append(subset)
-        
-        if combined:
-            res = pd.concat(combined, ignore_index=True)
-            res['Real_Pulse'] = res['Accel_Score'] * 10 # 전임자 포맷 복구
-            return res
-        return pd.DataFrame(columns=["Symbol", "Price", "Accel_Score", "Real_Pulse", "Risk_Tag"])
+    def run_process(self):
+        """메인 프로세스: 순차적 실행 및 에러 핸들링"""
+        try:
+            if not self.calculate_macro_spectrum(): return
+            if not self.floor_1_action(): return
+            if not self.floor_2_hunting(): return
+            
+            report_file = self.build_and_save_report()
+            if report_file:
+                self.send_telegram(report_file)
+                
+            print("🏁 모든 공정 완료. 시스템 대기 모드 진입.")
+        except Exception as e:
+            # [원칙 3] 수정 요청
+            print(f"\n🚨 시스템 중단: {e}")
+            print("📢 형님, 코드 내 논리가 충돌하거나 필수 파일이 오염되었습니다. 수식을 확인해 주십시오.")
 
-    def run_process(self):
-        # 1. [시간 설정] 한국 시간(KST) 및 요일 판정
-        from datetime import datetime, timedelta
-        kst_now = datetime.utcnow() + timedelta(hours=9)
-        weekday = kst_now.weekday()  # 0:월, 5:토
-        
-        # 2. [제목 결정] 요일별 리포트 타이틀 분기
-        if weekday == 0:
-            title = "📅 [V40 주초 개장상황 보고]"
-        elif weekday == 5:
-            title = "📊 [V40 주간 결산 보고]"
-        else:
-            title = "👹 [V40 일일 관제 보고]"
-
-        # 3. [데이터 처리] 매크로 분석 및 1, 2층 데이터 수집
-        if not self.calculate_macro_spectrum(): 
-            return # 분석 실패 시 중단 (원칙 2: 네거티브 체크)
-            
-        df_f1 = self._get_floor_1_data()
-        df_f2 = self._get_floor_2_data()
-
-        # 4. [리포트 생성] 텍스트 구성 (self.analysis_report로 통일)
-        self.analysis_report = f"{title}\n\n📊 [파동] V7:{self.v7_p:.1f}% | V8:{self.v8_p:.1f}%\n"
-        self.analysis_report += f"📢 상태: {self.market_state}\n\n🏢 [1층]\n"
-        
-        for _, r in df_f1.iterrows():
-            self.analysis_report += f"{r['Status_Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap_120']}%)\n"
-        
-        self.analysis_report += f"\n🧬 [2층]\n"
-        if not df_f2.empty:
-            for _, r in df_f2.head(10).iterrows():
-                # Risk_Tag와 Accel_Score가 있는지 확인 후 안전하게 추출
-                tag = r.get('Risk_Tag', '🚀')
-                score = r.get('Accel_Score', 0)
-                self.analysis_report += f"{tag} {r['Symbol']} | Q:{score}\n"
-        else:
-            self.analysis_report += "⚠️ 2층 데이터 로딩 실패\n"
-
-        # 5. [파일 저장] 원칙 1: 보고 전 반드시 엑셀 파일 생성 및 저장
-        file_name = f"V40_Weekly_Wolf_{kst_now.strftime('%m%d')}.xlsx"
-        df_summary = pd.DataFrame([{"V40_SUMMARY": line} for line in self.analysis_report.split('\n')])
-        
-        with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
-            df_f1.to_excel(writer, sheet_name='1층_보유점검', index=False)
-            df_f2.to_excel(writer, sheet_name='2층_신규발굴', index=False)
-            df_summary.to_excel(writer, sheet_name='종합리포트', index=False)
-
-        # 6. [최종 보고] 텔레그램 발송
-        try:
-            # (1) 텍스트 리포트 발송 (매일)
-            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                          json={"chat_id": self.chat_id, "text": self.analysis_report})
-
-            # (2) 토요일(5) 아침에만 '만들어둔 엑셀' 발송
-            if weekday == 5:
-                with open(file_name, 'rb') as f:
-                    requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
-                                  data={'chat_id': self.chat_id, 'caption': "📊 주간 데이터 정합성 검증 완료"}, 
-                                  files={'document': f})
-        except Exception as e:
-            print(f"❌ 보고 체계 장애: {e}")
-            
 if __name__ == "__main__":
-    # 스위치 2단계: V8 현금 비중에 +10% 가산하여 보수적으로 관측
-    engine = QuantumControlCenter(macro_v8_switch=2)
-    engine.run_process()
+    # 스위치 2: 보수적 관점 유지
+    engine = QuantumControlCenter(macro_v8_switch=2)
+    engine.run_process()
