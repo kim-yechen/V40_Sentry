@@ -243,15 +243,15 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 데이터 무결성 완전 복구 - 컬럼명 매칭 결함 해결
+        [공정 3] 데이터 무결성 완전 복구 - DataFrame/Series 혼동 버그 박멸
         """
-        logging.info("공정 3: 2층 타겟 무결성 정밀 해체 가동...")
+        logging.info("공정 3: 2층 타겟 전 구역 정밀 해체 및 3333 복원 가동...")
         
         configs = [
-            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Symbol", "종목"]},
-            {"title": "🎯 [BEST]", "key": "BEST", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Ticker", "Symbol"]},
-            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score_keys": ["Q_Score", "Energy", "점수"], "id_keys": ["Symbol", "Ticker"]},
-            {"title": "🤖 [BNAI]", "key": "BNAI", "score_keys": ["V_Energy", "Energy", "점수"], "id_keys": ["Date", "날짜"]}
+            {"title": "🛡️ [SHIELD]", "key": "COMMODITY", "score_keys": ["V_Energy", "Energy"], "id_keys": ["Symbol", "종목"]},
+            {"title": "🎯 [BEST]", "key": "BEST", "score_keys": ["V_Energy", "Energy"], "id_keys": ["Ticker", "Symbol"]},
+            {"title": "🚀 [TEN-B]", "key": "TEN_BAGGER", "score_keys": ["Q_Score", "Energy"], "id_keys": ["Symbol", "Ticker"]},
+            {"title": "🤖 [BNAI]", "key": "BNAI", "score_keys": ["V_Energy", "Energy"], "id_keys": ["Date", "날짜"]}
         ]
         
         all_targets = []
@@ -263,27 +263,32 @@ class QuantumControlCenter:
                 target_df = None
                 for f in files:
                     if cfg['key'].lower() in f.lower():
-                        # 파일 로드 시 컬럼명을 강제로 바꾸지 않는 안전 모드
-                        target_df = self.load_resource(f) 
-                        if target_df is not None: break
+                        target_df = self.load_resource(f)
+                        if target_df is not None and not target_df.empty: break
                 
-                if target_df is None or target_df.empty:
+                if target_df is None:
                     self.sections[cfg['title']] = ["❌ 데이터실종"] * 3
                     continue
 
-                # 컬럼명 유연화: 정의된 후보 중 실제 존재하는 컬럼 찾기
-                score_col = next((c for c in target_df.columns if any(k in c for k in cfg['score_keys'])), None)
-                id_col = next((c for c in target_df.columns if any(k in c for k in cfg['id_keys'])), target_df.columns[0])
+                # 컬럼 매칭 지능화
+                score_col = next((c for c in target_df.columns if any(k.lower() in c.lower() for k in cfg['score_keys'])), None)
+                id_col = next((c for c in target_df.columns if any(k.lower() in c.lower() for k in cfg['id_keys'])), target_df.columns[0])
 
                 if not score_col:
-                    raise KeyError(f"점수 컬럼 실종 (후보: {cfg['score_keys']})")
+                    raise KeyError(f"점수 컬럼({cfg['score_keys']})을 찾을 수 없음")
 
-                # 수치 무결성 강제 확보 (TIRX 48.4M 대응)
+                # [핵심수정] DataFrame object has no attribute 'str' 방어
+                # iloc[:, 0]을 통해 혹시 모를 중복 컬럼 발생 시 첫 번째 Series만 강제 추출
+                raw_scores = target_df[score_col]
+                if isinstance(raw_scores, pd.DataFrame):
+                    raw_scores = raw_scores.iloc[:, 0]
+
                 target_df['Clean_Score'] = pd.to_numeric(
-                    target_df[score_col].astype(str).str.replace(',', '').str.strip(), 
+                    raw_scores.astype(str).str.replace(',', '').str.strip(), 
                     errors='coerce'
                 ).fillna(0)
 
+                # 정렬 로직 (BNAI는 최신행 3개, 나머지는 점수순)
                 if "BNAI" in cfg['title']:
                     top3 = target_df.tail(3).iloc[::-1]
                 else:
@@ -291,10 +296,15 @@ class QuantumControlCenter:
 
                 res = []
                 for _, row in top3.iterrows():
-                    s = str(row.get(id_col, "TARGET")).strip()
+                    # ID값 추출 (중복 컬럼 방어)
+                    s_val = row[id_col]
+                    s = str(s_val.iloc[0] if isinstance(s_val, pd.Series) else s_val).strip()
+                    
                     if "-" in s and len(s) > 10: s = s.split(' ')[0][-5:] 
                     
                     v = row['Clean_Score']
+                    if isinstance(v, pd.Series): v = v.iloc[0] # 중복 방어
+                    
                     f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}"
                     res.append(f"{s}({f_val})")
                     all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
