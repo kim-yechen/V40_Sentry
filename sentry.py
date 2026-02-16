@@ -224,7 +224,7 @@ class QuantumControlCenter:
     # [3단계] 2층 12개 타겟 무결성 사냥
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-        logging.info("공정 3: 2층 4개 섹션 정밀 발굴...")
+        logging.info("공정 3: 2층 4개 섹션 정밀 발굴 (유연한 컬럼 매핑 가동)...")
         job_list = [
             ("🛡️ [SHIELD]", "COMMODITY_ANALYSIS_REPORT"),
             ("🎯 [BEST]", "V40_BEST_TARGETS"),
@@ -236,20 +236,34 @@ class QuantumControlCenter:
         for title, file in job_list:
             try:
                 df = self.load_resource(file)
-                # 점수 컬럼 식별
-                score_col = next((c for c in df.columns if any(x in c for x in ['Energy', 'Score', 'V_', '점수'])), df.columns[1])
                 
-                # 상위 3개 추출 (형님의 정예 멤버 12개 구성)
+                # [수선 포인트 1] 종목 코드 열 찾기 (대소문자, 공백 무시)
+                # 'Symbol', 'symbol', 'Ticker', 'ticker' 중 하나라도 있으면 잡습니다.
+                sym_col = next((c for c in df.columns if str(c).strip().lower() in ['symbol', 'ticker']), None)
+                
+                # [수선 포인트 2] 점수 열 찾기
+                score_col = next((c for c in df.columns if any(x in str(c).strip().lower() for x in ['energy', 'score', 'v_', '점수'])), None)
+
+                # 만약 못 찾으면 첫 번째, 두 번째 열을 강제로 할당 (지름길 방지 및 최소 무결성)
+                if not sym_col: sym_col = df.columns[0]
+                if not score_col: score_col = df.columns[1]
+                
+                # 데이터 정리 (공백 제거)
+                df[sym_col] = df[sym_col].astype(str).str.strip()
+                
+                # 상위 3개 추출
                 top3 = df.sort_values(by=score_col, ascending=False).head(3).copy()
                 
                 res = []
                 for _, row in top3.iterrows():
-                    sym = row['Symbol']
+                    sym = row[sym_col]
                     val = row[score_col]
+                    # 수치 무결성 체크
+                    val = float(val) if self.validate_data(val, f"{sym}_ENERGY", min_val=-999) else 0.0
+                    
                     res.append(f"{sym}({val:.1f})")
                     all_targets.append({"Section": title, "Symbol": sym, "Energy": val})
                 
-                # 3개 미만 시 보충
                 while len(res) < 3: res.append("⚠️ 타겟부재")
                 self.sections[title] = res
                 
