@@ -21,11 +21,11 @@ warnings.filterwarnings('ignore')
 
 # --------------------------------------------------------------------------
 # 로깅 시스템 구축 (추적 무결성 확보)
-# --------------------------------------------------------------------------
+# [수정된 28번 줄 라인]
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamFileHandler if 'google.colab' not in sys.modules else logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]  # 이 부분이 범인이었습니다.
 )
 
 class QuantumControlCenter:
