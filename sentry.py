@@ -8,7 +8,7 @@ import time
 import logging
 import traceback
 from datetime import datetime, timedelta
-import warningsload_resource
+import warnings
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
