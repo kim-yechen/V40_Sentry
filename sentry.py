@@ -283,40 +283,49 @@ class QuantumControlCenter:
         return file_name
 
     def send_telegram(self, file_path):
-        """최종 보고 단계: 텍스트 및 파일 전송"""
+        """[수정본] 초록불이든 빨간불이든, 형님께 보고는 무조건 합니다."""
         try:
-            # 1. 텍스트 리포트 발송
+            # 1. 텍스트 리포트 발송 (타임아웃 추가해서 무한대기 방지)
             requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                         json={"chat_id": self.chat_id, "text": self.analysis_report})
+                         json={"chat_id": self.chat_id, "text": self.analysis_report},
+                         timeout=10)
             
-            # 2. 주말(토요일) 보고 시에는 파일도 함께 전송
+            # 2. 파일 전송 조건 전면 수정
+            # - 토요일(5)이거나 
+            # - V7 에너지가 50을 넘는 '초록불' 상황이거나
+            # - 형님이 스위치를 2 이상으로 올렸을 때 무조건 발송
             kst_now = datetime.utcnow() + timedelta(hours=9)
-            if kst_now.weekday() == 5 or self.macro_v8_switch == 9: # 스위치 9는 테스트용 강제 발송
+            if kst_now.weekday() == 5 or self.v7_p > 50 or self.macro_v8_switch >= 2:
                 with open(file_path, 'rb') as f:
                     requests.post(f"https://api.telegram.org/bot{self.t_token}/sendDocument", 
-                                 data={'chat_id': self.chat_id, 'caption': "📊 V40 주간 데이터 무결성 검증본"}, 
-                                 files={'document': f})
+                                 data={'chat_id': self.chat_id, 'caption': f"📊 V40 무결성 검증본 (V7:{self.v7_p:.1f}%)"}, 
+                                 files={'document': f},
+                                 timeout=20)
             print("✉️ 텔레그램 보고 완료")
         except Exception as e:
             print(f"❌ 보고 전송 장애: {e}")
 
     def run_process(self):
-        """메인 프로세스: 순차적 실행 및 에러 핸들링"""
+        """[수정본] 중간에 에러 나면 형님 텔레그램으로 '수정요청'을 직접 보냅니다."""
         try:
-            if not self.calculate_macro_spectrum(): return
-            if not self.floor_1_action(): return
-            if not self.floor_2_hunting(): return
+            if not self.calculate_macro_spectrum(): 
+                raise ValueError("매크로 분석 실패")
+            if not self.floor_1_action(): 
+                raise ValueError("1층 보유주 진단 실패")
+            if not self.floor_2_hunting(): 
+                raise ValueError("2층 신규 사냥터 발굴 실패")
             
             report_file = self.build_and_save_report()
             if report_file:
                 self.send_telegram(report_file)
-                
-            print("🏁 모든 공정 완료. 시스템 대기 모드 진입.")
+            
+            print("🏁 모든 공정 완료.")
         except Exception as e:
-            # [원칙 3] 수정 요청
-            print(f"\n🚨 시스템 중단: {e}")
-            print("📢 형님, 코드 내 논리가 충돌하거나 필수 파일이 오염되었습니다. 수식을 확인해 주십시오.")
-
+            # [원칙 3 준수] 에러 발생 시 형님께 즉시 SOS 텔레그램 발송
+            error_msg = f"🚨 시스템 중단 알림\n내용: {e}\n\n📢 형님, 수식이나 파일에 문제가 있어 보고가 중단되었습니다. 확인 부탁드립니다!"
+            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
+                         json={"chat_id": self.chat_id, "text": error_msg})
+            print(f"\n🚨 시스템 중단 및 보고 완료: {e}")
 if __name__ == "__main__":
     # 스위치 2: 보수적 관점 유지
     engine = QuantumControlCenter(macro_v8_switch=2)
