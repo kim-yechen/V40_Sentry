@@ -394,37 +394,47 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [V40 통합 수선] 2층 전략주 발굴 및 무결성 가공 공정
-        오류 원인: try-except 블록 구조 파괴 수정 완료
+        [V40 최종 수선] 사용자 제공 엑셀(NBI_260, NGX_100) 전용 가공 공정
+        수정 사항: API 전수조사 완전 제거, 엑셀 컬럼명(V40_Energy, Vol_Ratio_%) 정밀 매칭
         """
-        logging.info("공정 2: 2층 전략주 발굴 (지능형 매칭 & 무결성 검증 가동)...")
+        logging.info("공정 2: 2층 전략주 발굴 (사용자 제공 엑셀 데이터 강제 타격)...")
         try:
-            # 1. API 데이터 확보
-            ngx_results = self._get_index_realtime_top3("^NGX")
-            nbi_results = self._get_index_realtime_top3("^NBI")
-            
-            # 2. BNAI 데이터 로드 및 지능형 컬럼 매칭
+            # 1. 사용자 제공 엑셀 리소스 로드 (파일 데이터 직접 사용)
+            ngx_df = self.load_resource("NGX_DATA")  # V40_NGX_100_COMPLETE (1).xlsx
+            nbi_df = self.load_resource("NBI_DATA")  # V40_NBI_260_COMPLETE (1).xlsx
             bnai_df = self.load_resource("BNAI_DATA")
-            
+
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️보수" if is_collapse else "🚀공격"
             f2_data = []
 
-            # [섹션 A: NGX/NBI 처리] - 반드시 try 블록 안에서 4칸 더 들여쓰기 되어야 함
-            for section, results in [("🚀 [NGX-3]", ngx_results), ("🧬 [NBI-3]", nbi_results)]:
+            # 2. NGX / NBI 데이터 가공 (사용자 엑셀 컬럼 기준)
+            for section, df in [("🚀 [NGX-3]", ngx_df), ("🧬 [NBI-3]", nbi_df)]:
                 self.sections[section] = []
-                for r in results:
-                    label = f"{prefix}({r['Symbol']}:E{r['Energy']}/S{r['Short']})"
-                    self.sections[section].append(label)
-                    f2_data.append({
-                        "Section": section, "Ticker": r['Symbol'], "Energy": r['Energy'],
-                        "Short_Ratio": r['Short'], "Curr_Price": r['Price'], "State": prefix
-                    })
+                if df is not None and not df.empty:
+                    # 엑셀 상단 3개 데이터 추출 (V40_Energy 기준 정렬된 상태 유지)
+                    df_top = df.head(3)
+                    for _, r in df_top.iterrows():
+                        # 사용자 엑셀 컬럼명 정밀 타격: Ticker, V40_Energy, Vol_Ratio_%
+                        sym = str(r.get('Ticker', 'N/A'))
+                        en = r.get('V40_Energy', 0.0)
+                        vol_ratio = r.get('Vol_Ratio_%', 0.0)
+                        price = r.get('Curr_Price', 0.0)
 
-            # [섹션 B: BNAI 처리]
+                        # 라벨 생성 시 'Short' 대신 엑셀에 있는 'Vol_Ratio_%' 사용
+                        label = f"{prefix}({sym}:E{en}/V{vol_ratio}%)"
+                        self.sections[section].append(label)
+                        
+                        f2_data.append({
+                            "Section": section, "Ticker": sym, "Energy": en,
+                            "Vol_Ratio": vol_ratio, "Curr_Price": price, "State": prefix
+                        })
+
+            # 3. BNAI 데이터 처리 (V_Energy 기준)
             if bnai_df is not None and not bnai_df.empty:
-                energy_col = next((c for c in bnai_df.columns if any(k in c for k in ['V_Energy', 'Energy', 'Q_Score'])), None)
-                symbol_col = next((c for c in bnai_df.columns if any(k in c for k in ['Symbol', 'Ticker', 'Date'])), bnai_df.columns[0])
+                # V_Energy 또는 Energy 컬럼 자동 탐색
+                energy_col = next((c for c in bnai_df.columns if any(k in c for k in ['V_Energy', 'Energy'])), None)
+                symbol_col = next((c for c in bnai_df.columns if any(k in c for k in ['Ticker', 'Symbol', 'Date'])), bnai_df.columns[0])
 
                 if energy_col:
                     bnai_df[energy_col] = pd.to_numeric(bnai_df[energy_col], errors='coerce').fillna(0)
@@ -437,23 +447,23 @@ class QuantumControlCenter:
                         self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
                         f2_data.append({
                             "Section": "BNAI", "Ticker": sym, "Energy": en, 
-                            "Short_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
+                            "Vol_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
                         })
 
-            # 3. 데이터프레임 무결성 검증 (Negative Check)
+            # 4. 무결성 검증 (Negative Check)
             self.floor_2_df = pd.DataFrame(f2_data)
             if self.floor_2_df.empty:
-                raise ValueError("2층 데이터 생성 결과가 비어있음 (코드/데이터 모순)")
+                raise ValueError("사용자 엑셀 로드 후 가공 데이터 0건 (리소스 연결 모순)")
 
             return True
 
         except Exception as e:
-            # [원칙 3] 에러 내용을 삭제하지 않고 상세 보고
-            err_msg = f"2층 수선공정 모순 발생: {str(e)}"
+            # 원칙 3: 모순 발생 시 상세 에러 보고
+            err_msg = f"2층 엑셀 가공 공정 내부 모순: {str(e)}"
             self.error_log.append(err_msg)
             import traceback
-            logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
-            return True # 시스템 중단 방지를 위해 True 반환
+            logging.error(f"❌ 2층 상세 에러 위치: {traceback.format_exc()}")
+            return True
 
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
