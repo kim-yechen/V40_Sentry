@@ -455,13 +455,6 @@ class QuantumControlCenter:
             logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
             return True # 시스템 중단 방지를 위해 True 반환
 
-    except Exception as e:
-        # 원칙 3: 에러 내용 상세 보고 및 시스템 중단 방지용 True 반환 (리포트 완성 목적)
-        err_msg = f"2층 수선공정 내부 모순: {str(e)}"
-        self.error_log.append(err_msg)
-        logging.error(f"❌ 2층 상세 에러 추적: {traceback.format_exc()}")
-        return True
-
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
