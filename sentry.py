@@ -393,22 +393,22 @@ class QuantumControlCenter:
     # [3단계] 2층 전략주 발굴 (필터링 적용 완료)
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-    """
-    [V40 통합 수선] 2층 전략주 발굴 및 무결성 가공 공정
-    원칙: 지능형 매칭 + Negative Check + 모순 즉각 보고
-    """
-    logging.info("공정 2: 2층 전략주 발굴 (지능형 매칭 & 무결성 검증 가동)...")
-    try:
-        # 1. API 데이터 확보 (NGX, NBI 실시간 Top 3)
-        ngx_results = self._get_index_realtime_top3("^NGX")
-        nbi_results = self._get_index_realtime_top3("^NBI")
-        
-        # 2. BNAI 데이터 로드 및 지능형 컬럼 매칭 (상단 코드의 핵심 기능)
-        bnai_df = self.load_resource("BNAI_DATA")
-        
-        is_collapse = self.v8_p >= 60.0
-        prefix = "⚠️보수" if is_collapse else "🚀공격"
-        f2_data = []
+        """
+        [V40 통합 수선] 2층 전략주 발굴 및 무결성 가공 공정
+        원칙: 지능형 매칭 + Negative Check + 모순 즉각 보고
+        """
+        logging.info("공정 2: 2층 전략주 발굴 (지능형 매칭 & 무결성 검증 가동)...")
+        try:
+            # 1. API 데이터 확보 (NGX, NBI 실시간 Top 3)
+            ngx_results = self._get_index_realtime_top3("^NGX")
+            nbi_results = self._get_index_realtime_top3("^NBI")
+            
+            # 2. BNAI 데이터 로드 및 지능형 컬럼 매칭
+            bnai_df = self.load_resource("BNAI_DATA")
+            
+            is_collapse = self.v8_p >= 60.0
+            prefix = "⚠️보수" if is_collapse else "🚀공격"
+            f2_data = []
 
         # [섹션 A: NGX/NBI 처리] 하단 코드의 상세 필드 구조 적용
         for section, results in [("🚀 [NGX-3]", ngx_results), ("🧬 [NBI-3]", nbi_results)]:
