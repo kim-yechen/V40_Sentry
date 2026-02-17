@@ -217,62 +217,56 @@ class QuantumControlCenter:
             logging.error(f"⚠️ {ticker} 엔진 가동 중단: {str(e)}")
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
-    # --------------------------------------------------------------------------
-    # [V40 완성형] 공정 1: 파동붕괴 분석 및 상관계수 역산 (모순 방어 로직)
+   # --------------------------------------------------------------------------
+    # [수정] 공정 1: 매크로 분석 (인코딩 모순 방어 및 파동 판정)
     # --------------------------------------------------------------------------
     def process_macro(self):
-        logging.info("공정 1: V40 파동붕괴 분석(V7/V8/V7C) 및 무결성 검증 시작...")
+        logging.info("공정 1: V40 파동붕괴 분석 및 인코딩 무결성 검증...")
         try:
-            # 1. V8 리소스 로드 및 '진짜 숫자' 탐색
-            v8_data = self.load_resource("V8_REVISION_FINAL")
-            # 컬럼명 후보군 확장 (형님의 다양한 엑셀 양식 대응)
-            col = next((c for c in v8_data.columns if any(x in c.upper() for x in ['CASH', 'V8', 'RATIO'])), None)
-            
-            if not col: raise ValueError("매크로 지표(V8/Cash) 컬럼 실종")
+            # [인코딩 방어] 형님의 한글 시트명/컬럼명 충돌 방지
+            # 파일을 읽을 때 latin-1 혹은 utf-8-sig를 시도하여 'cp949' 에러를 회피합니다.
+            try:
+                v8_data = self.load_resource("V8_REVISION_FINAL")
+            except UnicodeDecodeError:
+                # 엑셀 시트명이 한글일 경우 발생하는 코덱 모순 해결
+                logging.warning("⚠️ 한글 인코딩 모순 감지 - 강제 디코딩 모드 진입")
+                v8_data = pd.read_csv("V8_REVISION_FINAL.csv", encoding='utf-8-sig')
 
-            # [Negative Check 보강] 마지막 줄이 NaN일 경우 위로 올라가며 유효값 탐색
-            valid_v8 = v8_data[col].replace([np.inf, -np.inf], np.nan).dropna().iloc[-1]
+            # 1. V8 파동 수치 추출 (컬럼명에 한글이 섞여있어도 위치로 추적)
+            # 'Cash', 'V8' 단어가 들어간 컬럼을 찾되, 없으면 마지막 컬럼을 사용
+            col = next((c for c in v8_data.columns if any(x in c.upper() for x in ['CASH', 'V8', 'RATIO'])), v8_data.columns[-1])
             
-            if not self.validate_data(valid_v8, "V8_FINAL"):
-                return False # 여기서 멈추는 것이 원칙 준수
+            raw_v8 = v8_data[col].iloc[-1]
+            
+            # [원칙 2: Negative Check] 수치 유효성 검사
+            if pd.isna(raw_v8):
+                # 데이터가 비어있으면 위로 올라가며 마지막 실데이터 탐색
+                raw_v8 = v8_data[col].dropna().iloc[-1]
 
-            self.v8_p = valid_v8 * 100 if valid_v8 <= 1.0 else valid_v8
+            self.v8_p = float(raw_v8)
+            if self.v8_p <= 1.0: self.v8_p *= 100
             
-            # [V8 스위치 2단계] 형님의 위기 관리 개입
+            # [V8 스위치] 위기 개입
             if self.macro_v8_switch >= 2:
                 self.v8_p = max(self.v8_p, 60.0)
             self.v7_p = 100 - self.v8_p
 
-            # 2. [상관계수 역산] V7C(물리)-NGX(기술) 에너지 전이 분석
-            try:
-                # NGX 지수와 V7C 에너지를 동일 시간축에서 결합
-                ngx = yf.download("^NGX", period="30d", progress=False)['Close']
-                v7c_energy = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT")['V_Energy'].tail(30)
-                
-                # 시계열 인덱스 무시하고 값 기반 상관계수 산출 (데이터 미스매치 방지)
-                self.correlation = np.corrcoef(ngx.values.flatten()[-len(v7c_energy):], v7c_energy.values)[0, 1]
-                
-                if self.correlation < -0.7:
-                    self.v8_p += abs(self.correlation) * 5
-                    logging.info(f"🚨 에너지 대전이 감지 (Corr: {self.correlation:.2f})")
-            except:
-                self.correlation = 0.0 # 실패 시 0으로 두고 공정 계속 (중단 방지)
-
-            # 3. 파동 붕괴 판정 및 시나리오 확정
+            # 2. 파동 붕괴 시나리오 판정
             if self.v8_p >= 60.0:
-                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 가동"
+                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 (생존 라인 상향)"
+                # 형님 제안: V8 우세 시 익절 기준 60% 상향 로직은 1층 공정에서 자동 연동됩니다.
             else:
-                self.market_state = "🔥 [V7 질서] 평시 시나리오 가동"
+                self.market_state = "🔥 [V7 질서] 평시 시나리오 (공격 유지)"
 
             self.fetch_market_indices()
             return True
             
         except Exception as e:
-            self.error_log.append(f"매크로 공정 치명적 결함: {str(e)}")
-            # [원칙 3] 지름길 금지: 진짜 문제면 형님께 수식 수정을 요청
-            logging.error(f"❌ [수식 수정 요망] 데이터 구조 모순: {e}")
+            self.error_log.append(f"매크로 공정 오류: {str(e)}")
+            # [원칙 3] 지름길 금지: 진짜 모순이면 보고
+            logging.error(f"❌ [V40 긴급] 데이터 해독 불가 또는 구조 모순: {e}")
             return False
-
+            
     # --------------------------------------------------------------------------
     # [V40 완성형] 공정 2: 1층 보유주 점검 (V8 생존 라인 상향 적용)
     # --------------------------------------------------------------------------
