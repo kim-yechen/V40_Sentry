@@ -218,64 +218,59 @@ class QuantumControlCenter:
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
     # --------------------------------------------------------------------------
-    # [V40 완성형] 공정 1: 파동붕괴 분석 (엑셀 시트 직접 해독)
+    # [V40 완성형] 공정 1: 파동붕괴 분석 (데이터 위치 강제 고정)
     # --------------------------------------------------------------------------
     def process_macro(self):
-        logging.info("공정 1: V40 파동붕괴 분석 및 엑셀 무결성 검증 시작...")
+        logging.info("공정 1: V40 파동붕괴 분석... (데이터 강제 저격)")
         try:
-            # 1. V8 리소스 로드 (한글 시트명/파일명 완벽 대응)
-            # 형님이 주신 파일명은 'V8_REVISION_FINAL.xlsx'입니다.
-            file_path = "V8_REVISION_FINAL.xlsx"
+            # 1. V8 리소스 로드
+            v8_file = "V8_REVISION_FINAL.xlsx"
+            # 시트명이 깨질 수 있으니 시트 번호(0: 요약, 1: 전체)로 접근하거나 이름 명시
+            v8_df = pd.read_excel(v8_file, sheet_name=0) 
             
-            try:
-                # '최종수정_요약' 시트를 직접 지정해서 읽습니다.
-                v8_data = pd.read_excel(file_path, sheet_name=None)
-                # 시트명이 한글이라 깨질 경우를 대비해 첫 번째 시트를 강제로 가져옵니다.
-                sheet_name = list(v8_data.keys())[0]
-                df = v8_data[sheet_name]
-                logging.info(f"✅ 시트 접속 성공: {sheet_name}")
-            except Exception as e:
-                logging.error(f"❌ 엑셀 로드 실패: {e}")
+            # [수선] 이름으로 찾지 말고, 'V8_NextGen_Cash'가 포함된 열을 끝까지 뒤집니다.
+            target_col = None
+            for c in v8_df.columns:
+                if 'NextGen' in str(c) or 'V8' in str(c):
+                    target_col = c
+                    break
+            
+            if target_col is None:
+                # [원칙 3] 에러 시 가짜 데이터를 만들지 않고 즉시 보고
+                print("⚠️ [구조 모순] V8_REVISION_FINAL 엑셀에 'V8_NextGen_Cash' 열이 없습니다.")
                 return False
 
-            # 2. 파동 수치 추출 (V8_NextGen_Cash 컬럼 정밀 타격)
-            # 형님 엑셀 확인 결과: 마지막 줄에 '18'이라는 숫자가 있습니다.
-            col = next((c for c in df.columns if 'V8' in c or 'Cash' in c), df.columns[-1])
-            raw_v8 = df[col].dropna().iloc[-1]
-            
-            # [원칙 2: Negative Check]
+            # 마지막 유효 숫자 추출
+            raw_v8 = v8_df[target_col].dropna().iloc[-1]
             self.v8_p = float(raw_v8)
-            if self.v8_p <= 1.0: self.v8_p *= 100 # 0.18 -> 18% 변환
+            if self.v8_p <= 1.0: self.v8_p *= 100 
             
-            # [V8 스위치] 위기 시 60% 고정 로직
+            # [V8 스위치] 형님 지시 로직
             if self.macro_v8_switch >= 2:
                 self.v8_p = max(self.v8_p, 60.0)
-                logging.info(f"🛡️ 파동붕괴 스위치 가동: V8={self.v8_p}%")
 
             self.v7_p = 100 - self.v8_p
 
-            # 3. [V7C 연동] 원자재 에너지 분석
-            # COMMODITY_ANALYSIS_REPORT.xlsx - '원자재_진단' 시트의 47.19 수치 확인
+            # 2. V7C 원자재 에너지 추출 (안전 장치 강화)
             try:
-                c_file = "COMMODITY_ANALYSIS_REPORT.xlsx"
-                c_data = pd.read_excel(c_file, sheet_name=None)
-                c_df = c_data[list(c_data.keys())[0]]
-                self.v7c_energy = float(c_df.iloc[0, 1]) # 47.19 추출
+                c_df = pd.read_excel("COMMODITY_ANALYSIS_REPORT.xlsx", sheet_name=0)
+                # '현재 에너지'라는 글자가 있는 행의 옆 칸을 가져옵니다. (위치 무관)
+                energy_row = c_df[c_df.iloc[:, 0].astype(str).str.contains('현재 에너지')]
+                self.v7c_energy = float(energy_row.iloc[0, 1])
             except:
+                logging.warning("⚠️ V7C 데이터 위치 불분명: 기본값 0.0 처리")
                 self.v7c_energy = 0.0
 
-            # 4. 최종 시나리오 확정
-            if self.v8_p >= 60.0:
-                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 가동"
-            else:
-                self.market_state = "🔥 [V7 질서] 평시 시나리오 가동"
-
+            # 3. 시장 시나리오 판정
+            self.market_state = "🚨 [V8 붕괴]" if self.v8_p >= 60.0 else "🔥 [V7 질서]"
+            
             self.fetch_market_indices()
             return True
             
         except Exception as e:
-            self.error_log.append(f"매크로 분석 결함: {str(e)}")
-            logging.error(f"❌ [V40 긴급] 데이터 구조 모순: {e}")
+            # [원칙 3] 코드 에러 시 삭제하지 말고 보고
+            print(f"🚨 [V40 긴급] 공정 1 모순 발생: {e}")
+            print("형님, 엑셀 파일의 수치나 열 이름이 로직과 충돌합니다. 수정이 필요합니다.")
             return False
             
     # --------------------------------------------------------------------------
