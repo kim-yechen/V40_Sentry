@@ -263,25 +263,36 @@ class QuantumControlCenter:
                     break
             
             if m_df is not None:
-                # [무결성 보정] 'V_Energy'라는 글자가 포함된 모든 컬럼 중 첫 번째를 자동으로 잡습니다.
-                # 이렇게 하면 앞에 공백이 있든, 소문자든 무조건 잡아냅니다.
-                energy_col = next((c for c in m_df.columns if 'V_ENERGY' in c.upper().strip()), None)
+                # [무결성 강화] 컬럼명을 싹 다 대문자로 바꾸고 공백을 제거한 뒤 비교합니다.
+                # 형님 파일의 모든 컬럼을 전수조사해서 'V'와 'ENERGY'가 들어간 놈을 강제로 잡습니다.
+                target_col = None
+                for col in m_df.columns:
+                    clean_col = str(col).upper().replace(" ", "").strip()
+                    if "V_ENERGY" in clean_col or "VENERGY" in clean_col:
+                        target_col = col
+                        break
                 
-                if energy_col:
-                    m_df['Clean_Score'] = pd.to_numeric(m_df[energy_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                if target_col:
+                    m_df['Clean_Score'] = pd.to_numeric(m_df[target_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
                     
-                    # 'Shield' 등급 필터링
-                    shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
-                    top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
-                    
-                    res = []
-                    for _, r in top3.iterrows():
-                        res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
-                        all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
-                    self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
+                    # Grade 컬럼도 똑같은 방식으로 유연하게 찾기
+                    grade_col = next((c for c in m_df.columns if 'GRADE' in str(c).upper()), None)
+                    if grade_col:
+                        shield_df = m_df[m_df[grade_col].str.contains('Shield', case=False, na=False)]
+                        top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
+                        
+                        res = []
+                        for _, r in top3.iterrows():
+                            # Symbol 컬럼도 유연하게 찾기
+                            sym_col = next((c for c in m_df.columns if 'SYMBOL' in str(c).upper()), m_df.columns[0])
+                            res.append(f"{r[sym_col]} | E:{r['Clean_Score']:,.1f}")
+                            all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r[sym_col], "Energy": r['Clean_Score']})
+                        self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
                 else:
-                    # 컬럼을 못 찾으면 형님께 즉시 SOS (원칙 3 준수)
-                    raise KeyError(f"형님, MINING 파일에 'V_Energy' 컬럼이 안 보입니다. 확인 바랍니다.")
+                    # 컬럼을 정말 못 찾으면 파일의 모든 컬럼명을 형님께 보고 (원칙 3:Contradictory Check)
+                    actual_cols = ", ".join(m_df.columns.tolist())
+                    raise KeyError(f"형님, 파일에 'V_Energy'가 없습니다. 현재 컬럼들: [{actual_cols}]")
+                    
             else:
                 self.sections["🛡️ [SHIELD]"] = ["❌ MINING파일누락"] * 3
         except Exception as e:
