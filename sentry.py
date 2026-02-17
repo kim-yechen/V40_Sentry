@@ -102,56 +102,56 @@ class QuantumControlCenter:
     # [수선] 스크래핑 보조: 0개일 경우 '형님의 무결성 예비군' 즉시 투입
     # --------------------------------------------------------------------------
     def _get_index_realtime_top3(self, ticker):
-        """[V40-Overkill] 소스 5개 동시 타격 및 병렬 스캔 엔진"""
+        """[V40 수선] API 전수조사 + 공매도 + 모멘텀 융합 엔진"""
         is_ngx = "^NGX" in ticker
-        target_name = "Nasdaq Next Gen 100" if is_ngx else "Nasdaq Biotech"
-        
-        # 1. 다중 소스 URL 리스트 (형님 지시: 가용 소스 총동원)
-        sources = {
-            "Slickcharts": "https://www.slickcharts.com/nasdaq-next-gen-100" if is_ngx else "https://www.slickcharts.com/nasdaq-biotechnology",
-            "Zacks": f"https://www.zacks.com/funds/etf/{'QQQN' if is_ngx else 'IBB'}/holding",
-            "Nasdaq": f"https://www.nasdaq.com/market-activity/quotes/real-time", # 보조망
-            "Fintel": f"https://fintel.io/i/{'qqqn' if is_ngx else 'ibb'}"
-        }
-        
-        all_targets = set() # 중복 제거용
-        logging.info(f"🚀 [데이터 융단폭격] {target_name} 소스 전체 타격 시작...")
+        # 형님이 주신 파일에서 티커 리스트 추출 (파일이 없으면 예비군)
+        try:
+            target_file = "V40_NGX_100_COMPLETE.xlsx" if is_ngx else "V40_NBI_260_COMPLETE.xlsx"
+            ref_df = pd.read_excel(target_file)
+            tickers = ref_df['Ticker'].tolist()
+        except:
+            tickers = ["MSTR", "APP", "TTD", "DKNG"] if is_ngx else ["VRTX", "REGN", "GILD", "IBRX"]
 
-        # 2. 형님 식 병렬 처리 (가용 자원 다 때려박기)
-        def fetch_source(name, url):
+        logging.info(f"📡 {ticker} 구역 {len(tickers)}개 종목 API 타격 시작...")
+        
+        scored_list = []
+        
+        def fast_scan(sym):
             try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
-                res = requests.get(url, headers=headers, timeout=5)
-                # (각 소스별 파싱 로직 수행 - 생략)
-                return ["MSTR", "APP", "TTD"] # 예시 추출
-            except: return []
+                t = yf.Ticker(sym)
+                # 1. 기술적 지표 (최근 20일 데이터)
+                hist = t.history(period="20d")
+                if len(hist) < 15: return None
+                
+                curr_p = hist['Close'].iloc[-1]
+                ma20 = hist['Close'].mean()
+                rsi_val = 50 # 기본값 (RSI 계산 로직 생략/간소화 가능)
+                
+                # 2. 공매도 데이터 (yfinance info)
+                info = t.info
+                short_ratio = info.get('shortRatio', 0)
+                mkt_cap = info.get('marketCap', 0)
+                
+                # [V40 에너지 수식] 수익률 + 공매도 압박 + 이격도
+                momentum = ((curr_p / hist['Close'].iloc[-5]) - 1) * 100 # 5일 수익률
+                energy = (momentum * 0.5) + (short_ratio * 2.0) # 공매도 비중 가중치
+                
+                return {
+                    "Symbol": sym, 
+                    "Energy": round(energy, 2), 
+                    "Short": short_ratio,
+                    "Price": round(curr_p, 2)
+                }
+            except: return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_url = {executor.submit(fetch_source, n, u): n for n, u in sources.items()}
-            for future in concurrent.futures.as_completed(future_to_url):
-                all_targets.update(future.result())
-
-        # 3. 만약 사이트들이 다 막혔다? (형님의 무결성 원칙: 0개는 절대 안됨)
-        if not all_targets:
-            logging.warning(f"⚠️ 외부 소스 전멸. 형님의 'Sentry 예비군' 강제 투입!")
-            all_targets = ["MSTR", "APP", "TTD", "NET", "DKNG", "HOOD"] if is_ngx else ["VRTX", "REGN", "AMGN", "GILD", "BIIB", "MRNA"]
-
-        # 4. [중요] 10개씩 끊어서 정밀 스캔 (형님의 '쉬었다가 가기' 로직)
-        targets_list = list(all_targets)
-        final_scores = []
+        # 병렬 스캔 (형님 성격에 맞게 20개씩 풀가동)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            results = list(executor.map(fast_scan, tickers))
         
-        for i in range(0, len(targets_list), 10):
-            chunk = targets_list[i:i+10]
-            logging.info(f"📡 {i//10 + 1}구역 정밀 스캔 중... (10개씩 분할 중)")
-            
-            # 병렬로 에너지 계산 (verify_and_score)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as chunk_executor:
-                results = list(chunk_executor.map(self.verify_and_score, chunk))
-                final_scores.extend([r for r in results if r])
-            
-            time.sleep(0.5) # 형님 말씀하신 '잠시 쉬기' (서버 차단 방지)
-
-        top3 = sorted(final_scores, key=lambda x: x['Energy'], reverse=True)[:3]
+        valid_res = [r for r in results if r]
+        # 에너지 순 정렬 후 TOP 3 추출
+        top3 = sorted(valid_res, key=lambda x: x['Energy'], reverse=True)[:3]
+        
         return top3
 
     # --------------------------------------------------------------------------
@@ -393,57 +393,71 @@ class QuantumControlCenter:
     # [3단계] 2층 전략주 발굴 (필터링 적용 완료)
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-        logging.info("공정 3: 2층 전략주 발굴 (지능형 컬럼 매칭 가동)...")
-        try:
-            # 1. 실시간 데이터 확보 (실패 시 예비 명단 가동)
-            ngx_top3 = self._get_index_realtime_top3("^NGX")
-            nbi_top3 = self._get_index_realtime_top3("^NBI")
-            
-            # 2. BNAI 데이터 로드 및 유연한 컬럼 매칭
-            bnai_df = self.load_resource("BNAI_DATA")
-            
-            is_collapse = self.v8_p >= 60.0
-            prefix = "⚠️대기" if is_collapse else "🚀승인"
-            floor_2_results = []
+    """
+    [V40 통합 수선] 2층 전략주 발굴 및 무결성 가공 공정
+    원칙: 지능형 매칭 + Negative Check + 모순 즉각 보고
+    """
+    logging.info("공정 2: 2층 전략주 발굴 (지능형 매칭 & 무결성 검증 가동)...")
+    try:
+        # 1. API 데이터 확보 (NGX, NBI 실시간 Top 3)
+        ngx_results = self._get_index_realtime_top3("^NGX")
+        nbi_results = self._get_index_realtime_top3("^NBI")
+        
+        # 2. BNAI 데이터 로드 및 지능형 컬럼 매칭 (상단 코드의 핵심 기능)
+        bnai_df = self.load_resource("BNAI_DATA")
+        
+        is_collapse = self.v8_p >= 60.0
+        prefix = "⚠️보수" if is_collapse else "🚀공격"
+        f2_data = []
 
-            # [NGX-3/NBI-3 처리] 빈 값 방지 로직
-            for section, top3 in [("🚀 [NGX-3]", ngx_top3), ("🧬 [NBI-3]", nbi_top3)]:
-                self.sections[section] = []
-                for s in top3:
-                    sym = s.get('Symbol', 'N/A')
-                    en = s.get('Energy', 0.0)
-                    self.sections[section].append(f"{prefix}({sym}:{en}%)")
-                    floor_2_results.append({"Section": section, "Symbol": sym, "Energy": en, "State": prefix})
+        # [섹션 A: NGX/NBI 처리] 하단 코드의 상세 필드 구조 적용
+        for section, results in [("🚀 [NGX-3]", ngx_results), ("🧬 [NBI-3]", nbi_results)]:
+            self.sections[section] = []
+            for r in results:
+                label = f"{prefix}({r['Symbol']}:E{r['Energy']}/S{r['Short']})"
+                self.sections[section].append(label)
+                f2_data.append({
+                    "Section": section, "Ticker": r['Symbol'], "Energy": r['Energy'],
+                    "Short_Ratio": r['Short'], "Curr_Price": r['Price'], "State": prefix
+                })
 
-            # [BNAI 처리] 형님 엑셀의 'V_Energy'를 찾아내는 정밀 로직
-            if bnai_df is not None and not bnai_df.empty:
-                # 'Energy'가 들어간 모든 컬럼명을 찾음 (V_Energy, Energy_Inertia 등 중 가장 적합한 것)
-                energy_col = next((c for c in bnai_df.columns if 'V_Energy' in c or 'Energy' == c or 'Q_Score' in c), None)
-                symbol_col = next((c for c in bnai_df.columns if 'Symbol' in c or 'Ticker' in c or 'Date' == c), bnai_df.columns[0])
+        # [섹션 B: BNAI 처리] 상단 코드의 유연한 알고리즘 통합
+        if bnai_df is not None and not bnai_df.empty:
+            # 컬럼명 자동 식별 알고리즘 (V_Energy, Energy, Q_Score 등 대응)
+            energy_col = next((c for c in bnai_df.columns if any(k in c for k in ['V_Energy', 'Energy', 'Q_Score'])), None)
+            symbol_col = next((c for c in bnai_df.columns if any(k in c for k in ['Symbol', 'Ticker', 'Date'])), bnai_df.columns[0])
 
-                if energy_col:
-                    # 데이터 타입 강제 변환 후 정렬
-                    bnai_df[energy_col] = pd.to_numeric(bnai_df[energy_col], errors='coerce').fillna(0)
-                    bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
-                    
-                    self.sections["🤖 [BNAI]"] = []
-                    for _, r in bnai_top.iterrows():
-                        sym = str(r[symbol_col]) if symbol_col != 'Date' else "TGT" # Date만 있으면 TGT로 표시
-                        en = float(r[energy_col])
-                        self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
-                        floor_2_results.append({"Section": "BNAI", "Symbol": sym, "Energy": en, "State": prefix})
-                else:
-                    self.error_log.append("⚠️ BNAI 에너지 컬럼 식별 불가: 수동 확인 요망")
+            if energy_col:
+                bnai_df[energy_col] = pd.to_numeric(bnai_df[energy_col], errors='coerce').fillna(0)
+                bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
+                
+                self.sections["🤖 [BNAI]"] = []
+                for _, r in bnai_top.iterrows():
+                    sym = str(r[symbol_col]) if symbol_col != 'Date' else "TGT"
+                    en = float(r[energy_col])
+                    self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
+                    f2_data.append({
+                        "Section": "BNAI", "Ticker": sym, "Energy": en, 
+                        "Short_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
+                    })
+            else:
+                # 원칙 3: 모순 발생 시 삭제하지 않고 즉각 보고
+                self.error_log.append("⚠️ BNAI 에너지 컬럼 식별 불가: 수동 확인 요망 (데이터 구조 모순)")
 
-            self.floor_2_df = pd.DataFrame(floor_2_results)
-            return True # 어떤 모순이 있어도 리포트 완성을 위해 True 반환
+        # 3. 데이터프레임 무결성 검증 (Negative Check) - 하단 코드의 핵심 원칙
+        self.floor_2_df = pd.DataFrame(f2_data)
+        if self.floor_2_df.empty:
+            # 원칙 2: 데이터가 비어있는 기계적 에러 발생 시 예외 발생
+            raise ValueError("2층 데이터 최종 생성 공백 발생 (시스템 내부 모순)")
 
-        except Exception as e:
-            # [원칙 3] 에러 내용을 삭제하지 않고 상세 보고
-            err_msg = f"2층 공정 내부 모순 발생: {str(e)}"
-            self.error_log.append(err_msg)
-            logging.error(f"❌ 2층 상세 에러: {traceback.format_exc()}")
-            return True # 시스템 중단 방지
+        return True
+
+    except Exception as e:
+        # 원칙 3: 에러 내용 상세 보고 및 시스템 중단 방지용 True 반환 (리포트 완성 목적)
+        err_msg = f"2층 수선공정 내부 모순: {str(e)}"
+        self.error_log.append(err_msg)
+        logging.error(f"❌ 2층 상세 에러 추적: {traceback.format_exc()}")
+        return True
 
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
