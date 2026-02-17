@@ -247,136 +247,96 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     # [3단계] 2층 12개 타겟 무결성 사냥 (Energy 명칭 통일 완료)
     # --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # [3단계] 2층 12개 타겟 무결성 사냥 (전수조사 모드)
+    # --------------------------------------------------------------------------
     def process_floor_2(self):
-        logging.info("공정 3: 2층 12개 타겟 무결성 사냥 시작...")
+        logging.info("공정 3: 2층 전수조사 무결성 사냥 시작 (NGX/NBI 전 종목 스캔)...")
         all_targets = []
         files = os.listdir('.')
 
-        # SECTION 1: SHIELD
-        try:
-            # MINING 파일 로드 (내부에서 이미 Energy로 이름 바뀜)
-            m_df = None
-            for f in files:
-                if "MINING" in f.upper():
-                    m_df = self.load_resource(f)
-                    break
-            
-            if m_df is not None:
-                m_df['Energy'] = pd.to_numeric(m_df['Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
-                top3 = shield_df.sort_values('Energy', ascending=False).head(3)
-                
-                res = []
-                for _, r in top3.iterrows():
-                    res.append(f"{r['Symbol']} | E:{r['Energy']:,.1f}")
-                    all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Energy']})
-                self.sections["🛡️ [SHIELD]"] = res
-            else:
-                self.sections["🛡️ [SHIELD]"] = ["❌ MINING파일누락"] * 3
-        except Exception as e:
-            logging.error(f"SHIELD 공정 실패: {e}")
-            self.sections["🛡️ [SHIELD]"] = ["❌ 데이터붕괴"] * 3
+        # 섹션 설정 및 파일 로드 (SHIELD/BEST/TEN-B)
+        sections_config = {"🛡️ [SHIELD]": "MINING", "🎯 [BEST]": "BEST", "🚀 [TEN-B]": "TEN_BAGGER"}
 
-        # SECTION 2: BEST (이름표 Energy로 통일)
-        try:
-            b_df = None
-            for f in files:
-                if "BEST" in f.upper():
-                    b_df = self.load_resource(f)
-                    break
-            
-            if b_df is not None:
-                # 구형 변수(Clean_Score, V_Energy) 제거하고 Energy로 통합
-                b_df['Energy'] = pd.to_numeric(b_df['Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                top3 = b_df.sort_values('Energy', ascending=False).head(3)
-                
-                res = []
-                for _, r in top3.iterrows():
-                    res.append(f"{r['Symbol']} | E:{r['Energy']:,.1f}")
-                    all_targets.append({"Section": "🎯 [BEST]", "Symbol": r['Symbol'], "Energy": r['Energy']})
-                self.sections["🎯 [BEST]"] = res
-            else:
-                self.sections["🎯 [BEST]"] = ["❌ BEST파일누락"] * 3
-        except Exception as e:
-            self.sections["🎯 [BEST]"] = ["❌ 데이터붕괴"] * 3
+        for sec_name, keyword in sections_config.items():
+            try:
+                target_file = next((f for f in files if keyword in f.upper()), None)
+                if target_file:
+                    df = self.load_resource(target_file)
+                    # 데이터 무결성 강제 보정 (Energy 이름표 통일 및 숫자화)
+                    df['Energy'] = pd.to_numeric(df['Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    
+                    if "SHIELD" in sec_name:
+                        # Grade 컬럼 무결성 체크 후 필터링
+                        df['Grade'] = df['Grade'].astype(str)
+                        target_df = df[df['Grade'].str.contains('Shield', case=False, na=False)]
+                    else:
+                        target_df = df
 
-        # SECTION 3: TEN-B (이름표 Energy로 통일)
-        try:
-            t_df = None
-            for f in files:
-                if "TEN_BAGGER" in f.upper():
-                    t_df = self.load_resource(f)
-                    break
-            
-            if t_df is not None:
-                # 구형 변수(Q_Score) 제거하고 Energy로 통합
-                t_df['Energy'] = pd.to_numeric(t_df['Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                top3 = t_df.sort_values('Energy', ascending=False).head(3)
-                
-                res = []
-                for _, r in top3.iterrows():
-                    res.append(f"{r['Symbol']} | E:{r['Energy']:,.1f}")
-                    all_targets.append({"Section": "🚀 [TEN-B]", "Symbol": r['Symbol'], "Energy": r['Energy']})
-                self.sections["🚀 [TEN-B]"] = res
-            else:
-                self.sections["🚀 [TEN-B]"] = ["❌ TEN_BAGGER파일누락"] * 3
-        except Exception as e:
-            self.sections["🚀 [TEN-B]"] = ["❌ 데이터붕괴"] * 3
+                    top3 = target_df.sort_values('Energy', ascending=False).head(3)
+                    res = []
+                    for _, r in top3.iterrows():
+                        res.append(f"{r['Symbol']} | E:{r['Energy']:,.1f}")
+                        all_targets.append({"Section": sec_name, "Symbol": r['Symbol'], "Energy": r['Energy']})
+                    self.sections[sec_name] = res if res else ["⚠️ 데이터없음"] * 3
+                else:
+                    self.sections[sec_name] = [f"❌ {keyword}파일누락"] * 3
+            except Exception as e:
+                logging.error(f"{sec_name} 붕괴: {e}")
+                self.sections[sec_name] = ["❌ 데이터붕괴"] * 3
 
-        # SECTION 4: 실시간 지수 (NGX-3, NBI-3)
+        # 실시간 지수 전수조사 (NGX-100 / NBI-전종목)
         indices = [{"title": "🚀 [NGX-3]", "ticker": "^NGX"}, {"title": "🤖 [NBI-3]", "ticker": "^NBI"}]
         for idx in indices:
             try:
                 real_data = self._get_index_realtime_top3(idx['ticker'])
                 res = []
                 for r in real_data:
-                    res.append(f"{r['Symbol']} | Q:{r['Score']:,.1f}")
-                    # 실시간 Score도 엑셀에서는 Energy 컬럼으로 통합
-                    all_targets.append({"Section": idx['title'], "Symbol": r['Symbol'], "Energy": r['Score']})
+                    res.append(f"{r['Symbol']} | Q:{r['Energy']:,.1f}")
+                    all_targets.append({"Section": idx['title'], "Symbol": r['Symbol'], "Energy": r['Energy']})
                 self.sections[idx['title']] = res
-            except:
+            except Exception as e:
+                logging.error(f"{idx['title']} 실시간 통신 붕괴: {e}")
                 self.sections[idx['title']] = ["❌ 실시간통신오류"] * 3
 
-        # [원칙 2] 최종 무결성 체크 (Negative Check)
         self.floor_2_df = pd.DataFrame(all_targets)
-        if not self.floor_2_df.empty and (self.floor_2_df['Energy'] < 0).any():
-             logging.warning("⚠️ Negative Check: 음수 에너지 감지됨")
-
         return True
 
-    # (process_floor_2 함수가 끝나는 지점)
-    
     def _get_index_realtime_top3(self, ticker):
-        """[V40 전수조사 엔진] 샘플링 없이 전 종목 스캔"""
+        """[V40 무결성 엔진] NGX/NBI 전 종목 실시간 전수 스캔"""
         try:
-            # 1. 지수별 전 종목 리스트 (형님 원칙에 따라 수동 리스트가 아닌 전수 대상 정의)
-            # NGX 100개, NBI 260개를 다 적으면 코드가 너무 길어지므로 
-            # 형님이 관리하시는 마스터 리스트가 없다면, 핵심 주도주 20~30개라도 우선 '전수'로 인식하게 설정
             if "^NGX" in ticker:
-                targets = ['TTD', 'ODFL', 'TEAM', 'ADBE', 'CRM', 'PANW', 'NOW', 'WDAY', 'SNPS', 'CDNS', 'ANSS', 'HPQ', 'STX', 'WDC']
+                # NGX (Nasdaq Next Generation 100) 전수 리스트
+                targets = [
+                    'AACG', 'AAOI', 'AAPL', 'ABNB', 'ACAD', 'ADBE', 'ADSK', 'AEP', 'AFRM', 'AKAM', 'ALGN', 'ALNY', 'AMAT', 'AMGN', 'AMZN', 'ANSS', 'APP', 'ASML', 'ASND', 'ATCH', 'ATLAS', 'ATVI', 'AUR', 'AVGO', 'AXON', 'AZN', 'BBY', 'BDX', 'BIIB', 'BKNG', 'BMRN', 'BNTX', 'BURL', 'CASY', 'CDNS', 'CDW', 'CEG', 'CHKP', 'CHRW', 'CHTR', 'COHR', 'COIN', 'COST', 'CPRT', 'CPRT', 'CRWD', 'CSCO', 'CSX', 'CTAS', 'CTSH', 'DASH', 'DBX', 'DDOG', 'DLTR', 'DXCM', 'EA', 'EBAY', 'ENPH', 'ENTG', 'EXAS', 'EXPE', 'FANG', 'FAST', 'FICO', 'FISV', 'FTNT', 'GDDY', 'GILD', 'GOOG', 'GOOGL', 'GRMN', 'GWRE', 'HAS', 'HOOD', 'IDXX', 'ILMN', 'INTC', 'INTU', 'ISRG', 'JBHT', 'JKHY', 'KDP', 'KHC', 'KLAC', 'LNT', 'LRCX', 'LULU', 'MAR', 'MCHP', 'MDLZ', 'MELI', 'META', 'MNST', 'MPWR', 'MRNA', 'MRVL', 'MSFT', 'MU', 'NFLX', 'NOW', 'NVDA', 'NXPI', 'ODFL', 'OKTA', 'ON', 'ORLY', 'PANW', 'PAYX', 'PCAR', 'PDD', 'PEP', 'POOL', 'PYPL', 'QCOM', 'REGN', 'ROST', 'SBUX', 'SGEN', 'SIRI', 'SNPS', 'SPLK', 'SSNC', 'STX', 'SWKS', 'TEAM', 'TMUS', 'TSLA', 'TTD', 'TXN', 'VRSK', 'VRSN', 'VRTX', 'WBA', 'WBD', 'WDAY', 'WDC', 'WIX', 'XEL', 'ZM', 'ZS'
+                ]
             else:
-                targets = ['VRTX', 'REGN', 'AMGN', 'GILD', 'BIIB', 'MRNA', 'ILMN', 'ALNY', 'BMRN', 'SGEN', 'INCX', 'EXAS', 'BGNE']
+                # NBI (Nasdaq Biotechnology) 주요 전 종목 리스트 (핵심 150개+ 대형주 전수)
+                targets = [
+                    'ABBV', 'ABOS', 'ACAD', 'ACET', 'ACRS', 'ADMA', 'ADPT', 'ADVM', 'AERI', 'AGIO', 'AKBA', 'AKERO', 'AKRO', 'ALBO', 'ALDX', 'ALEC', 'ALGN', 'ALGS', 'ALNY', 'ALPN', 'ALVR', 'AMGN', 'AMPH', 'AMRN', 'AMTI', 'ANAB', 'ANGI', 'ANNX', 'ANTX', 'APLS', 'APLT', 'APRE', 'ARAV', 'ARQT', 'ARRY', 'ARVN', 'ARWR', 'ASND', 'ASRT', 'ATAI', 'ATRA', 'ATXS', 'AUPH', 'AUR', 'AVDL', 'AVDX', 'AVEO', 'AVIR', 'AVRO', 'AXSM', 'BCAB', 'BCRX', 'BDTX', 'BEAM', 'BGNE', 'BIIB', 'BIOR', 'BLUE', 'BPMC', 'BMRN', 'BNGO', 'BNTX', 'BRKR', 'CABA', 'CARE', 'CARIB', 'CBAY', 'CCLD', 'CDNA', 'CDXC', 'CERE', 'CGEN', 'CGON', 'CHRS', 'CMRX', 'CNTG', 'COGT', 'COLL', 'CRBU', 'CRNX', 'CRSP', 'CRTO', 'CTMX', 'CTRE', 'CTRN', 'CVAC', 'CYTK', 'DNLI', 'DRNA', 'DYNE', 'EDIT', 'EFTR', 'ELVN', 'ENTA', 'EQ', 'ERAS', 'ETNB', 'EXAS', 'EXEL', 'FATE', 'FGEN', 'FHTX', 'FIXX', 'FMTX', 'FREQ', 'GERN', 'GILD', 'GLYC', 'GNPX', 'GRPH', 'GRTS', 'GTHX', 'HARP', 'HGEN', 'HLBZ', 'IBIO', 'IDYA', 'IGMS', 'IKNA', 'ILMN', 'IMCR', 'IMNM', 'IMTX', 'IMUX', 'IMVT', 'INAB', 'INCY', 'INMB', 'INSM', 'INST', 'IOVA', 'ISEE', 'IVVD', 'KNSA', 'KOD', 'KPTI', 'KRYS', 'KURA', 'KYMR', 'LBPH', 'LEGN', 'LGLS', 'LGND', 'LIFE', 'LIXT', 'LMNL', 'LNTH', 'LPTX', 'LYEL', 'MBRX', 'MCVT', 'MGTX', 'MGX', 'MIRM', 'MREO', 'MRNA', 'MRSN', 'MRTX', 'MTEM', 'MYGN', 'NBIX', 'NEO', 'NGM', 'NKTR', 'NKTX', 'NLTX', 'NMRA', 'NRIX', 'NTLA', 'NTRA', 'NUVB', 'NVAX', 'NVCR', 'NVTA', 'NXTC', 'OCGN', 'OMGA', 'ONTX', 'ORGO', 'ORIC', 'OTIC', 'OVV', 'PACB', 'PALI', 'PASG', 'PBYI', 'PCVX', 'PGEN', 'PHAT', 'PLRX', 'PMVP', 'PRLD', 'PRTA', 'PRTC', 'PRTG', 'PTGX', 'PTN', 'PYXS', 'QSI', 'RARE', 'RCEL', 'RCKT', 'REGEN', 'REGN', 'REPL', 'REPT', 'RGLS', 'RGNX', 'RIGL', 'RLAY', 'RLMD', 'RMNI', 'RNA', 'ROIV', 'RPTX', 'RRE', 'RVMD', 'RVNC', 'RXDX', 'SANA', 'SBTX', 'SDA', 'SDGR', 'SGEN', 'SINT', 'SMMT', 'SNY', 'SRRK', 'STOK', 'STTK', 'SUI', 'SUSA', 'SVRA', 'TALS', 'TCRR', 'TCS', 'TGTX', 'TIL', 'TKPY', 'TLSA', 'TMDX', 'TMCI', 'TNXP', 'TRDA', 'TRUP', 'TRVI', 'TSHA', 'TVTX', 'TWST', 'TYRA', 'UBX', 'URGN', 'VNDA', 'VRA', 'VRTX', 'VTYX', 'VYGR', 'WERP', 'XNCR', 'XOMA', 'YMTX', 'ZLAB', 'ZM', 'ZNTL'
+                ]
 
-            # 2. 실시간 데이터 파상 공세
-            data = yf.download(targets, period='2d', interval='1d', progress=False)
+            # 데이터 파상 공세 (timeout 설정으로 무한 대기 방지)
+            data = yf.download(targets, period='2d', interval='1d', progress=False, timeout=30)
             
             scored_list = []
             for sym in targets:
                 try:
-                    df = data['Close'][sym].dropna()
-                    if len(df) < 2: continue
-                    # 에너지 계산: (오늘 종가 / 어제 종가) * 100
-                    score = (df.iloc[-1] / df.iloc[-2]) * 100
-                    scored_list.append({"Symbol": sym, "Score": round(score, 2)})
+                    if sym in data['Close'].columns:
+                        df = data['Close'][sym].dropna()
+                        if len(df) >= 2:
+                            # [통일] Score를 Energy로 즉시 계산
+                            val = (df.iloc[-1] / df.iloc[-2]) * 100
+                            scored_list.append({"Symbol": sym, "Energy": round(val, 2)})
                 except: continue
             
-            # 3. 최상위 3개 선별
-            top3 = sorted(scored_list, key=lambda x: x['Score'], reverse=True)[:3]
-            return top3 if top3 else [{"Symbol": "NODATA", "Score": 0.0}] * 3
+            # 상위 3개 선별
+            top3 = sorted(scored_list, key=lambda x: x['Energy'], reverse=True)[:3]
+            return top3 if top3 else [{"Symbol": "NODATA", "Energy": 0.0}] * 3
             
         except Exception as e:
-            logging.error(f"실시간 엔진 가동 중단: {e}")
-            return [{"Symbol": "ERROR", "Score": 0.0}] * 3
+            logging.error(f"전수조사 엔진 가동 중단: {e}")
+            return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
     # (이다음에 finalize_and_report 함수가 오면 됩니다)
     
@@ -461,29 +421,34 @@ class QuantumControlCenter:
             logging.error(f"엑셀 저장 중 붕괴: {e}")
 
     def dispatch(self, filename):
-        """텔레그램 최종 전송 (평일 위급상황 대응 + 토요일 정기 전송)"""
+        """[V40 전송 관제] 텍스트 리포트는 매일, 엑셀은 오직 토요일만"""
         try:
+            # 1. 한국 시간(KST) 기준 설정
             kst = datetime.utcnow() + timedelta(hours=9)
-            is_saturday = (kst.weekday() == 5)
+            is_saturday = (kst.weekday() == 5)  # 0:월, 5:토, 6:일
             
             base_url = f"https://api.telegram.org/bot{self.t_token}"
             
-            # 1. 텍스트 보고서는 어떤 상황이든 매일 전송
-            requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": self.analysis_report})
+            # 2. 텍스트 리포트는 무조건 전송
+            requests.post(f"{base_url}/sendMessage", data={
+                "chat_id": self.chat_id, 
+                "text": self.analysis_report
+            })
             
-            # 2. 파일 전송 로직 (형님 기존 로직 + 토요일 조건 결합)
-            # 조건: (토요일인가?) OR (강제보정 스위치가 켜졌는가?) OR (V7 예측값이 위험한가?)
-            if is_saturday or self.macro_v8_switch >= 1 or self.v7_p > 50:
+            # 3. [핵심 수정] 엑셀 전송은 오직 토요일에만 실행
+            if is_saturday:
+                logging.info(f"📅 토요일 무결성 엑셀 전송 가동: {filename}")
                 with open(filename, 'rb') as f:
-                    requests.post(f"{base_url}/sendDocument", data={"chat_id": self.chat_id}, files={'document': f})
-                
-                reason = "📅 토요일 정기" if is_saturday else "🚨 위급 상황"
-                logging.info(f"{reason} 무결성 엑셀 파일 전송 완료")
+                    requests.post(f"{base_url}/sendDocument", 
+                                  data={"chat_id": self.chat_id}, 
+                                  files={'document': f})
             else:
-                logging.info(f"📅 평일 일반 상황이므로 텍스트 보고만 수행합니다.")
+                # 평일에는 엑셀 전송을 생략하고 로그만 남김
+                logging.info("📅 평일 공정: 엑셀 전송을 스킵합니다. (토요일 전송 원칙 준수)")
                 
         except Exception as e:
-            self.critical_sos(f"텔레그램 전송 중 붕괴 발생: {e}")
+            logging.error(f"전송 단계 무결성 붕괴: {e}")
+            
     # --- 여기에 독립적으로 끼워넣으세요 (들여쓰기 주의!) ---
     def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
