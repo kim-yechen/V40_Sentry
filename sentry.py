@@ -294,101 +294,75 @@ class QuantumControlCenter:
             logging.error(f"❌ 2층 공정 에러 상세: {traceback.format_exc()}")
             return False
 
-    # [보강] 실시간 추출 엔진 (기존 _get_index_realtime_top3를 이 버전으로 교체 권장)
+    # --------------------------------------------------------------------------
+    # [최종 교체본] 실시간 전수조사 엔진 (지름길 금지 / 어제 종가 기준)
+    # --------------------------------------------------------------------------
     def _get_index_realtime_top3(self, ticker):
-        """실시간 ETF 기반 상위 종목 추출 및 상폐 종목 필터링"""
-        target_etf = "QQQN" if "^NGX" in ticker else "IBB"
-        try:
-            etf = yf.Ticker(target_etf)
-            # yfinance 최신 버전의 holdings를 쓰되, 실패 시 하드코딩된 주요 리스트로 우회하지 않고 보고함
-            df_holdings = etf.holdings 
-            
-            if df_holdings is None or df_holdings.empty:
-                # [No Shortcuts] 데이터 없으면 가짜 안 만들고 에러 던짐
-                raise ValueError(f"{target_etf} 실시간 리스트 확보 실패")
-
-            # 에너지(당일 변동성) 계산 로직
-            valid_list = []
-            symbols = df_holdings['Symbol'].tolist()[:15] # 상위 15개만 정밀 분석
-            
-            for sym in symbols:
-                if not sym or pd.isna(sym): continue
-                t = yf.Ticker(sym)
-                h = t.history(period="2d")
-                if len(h) < 2: continue
-                
-                change = ((h['Close'].iloc[-1] / h['Close'].iloc[-2]) - 1) * 100
-                valid_list.append({"Symbol": sym, "Energy": round(change, 2)})
-            
-            # 에너지 점수 높은 순 정렬
-            top3 = sorted(valid_list, key=lambda x: x['Energy'], reverse=True)[:3]
-            return top3
-        except Exception as e:
-            logging.warning(f"⚠️ {ticker} 추출 중 부분 결함: {e}")
-            return [{"Symbol": "CHECK", "Energy": 0.0}] * 3
-            
-    # 3번 #
-    def _get_index_realtime_top3(self, ticker):
-        """[V40 무결성 엔진] 하드코딩 폐기 / 실시간 ETF 홀딩스 직접 추출 방식"""
+        """[V40 정공법] 하드코딩 전면 폐기 / 실시간 구성 종목 스크래핑 후 전수조사"""
         import concurrent.futures
-        
-        # 1. 대상 ETF 타격 지점 설정
+        import requests
+        from bs4 import BeautifulSoup
+
+        # 1. 지수별 실시간 구성 종목 소스 타격
         target_etf = "QQQN" if "^NGX" in ticker else "IBB"
-        logging.info(f"📡 [실시간 관제] {target_etf} 구성 종목 직접 추출 중...")
-
+        logging.info(f"📡 [실시간 전수조사] {target_etf} 현재 구성 종목 리스트 추출 시작...")
+        
+        targets = []
         try:
-            # 2. [V40 직계 추출] 상폐 종목이 섞인 리스트가 아닌, 현재 시점 ETF 보유 종목만 획득
-            etf_obj = yf.Ticker(target_etf)
+            # [정공법] 외부 금융 데이터에서 현재 구성 종목 전수 획득
+            url = f"https://www.zacks.com/funds/etf/{target_etf}/holding"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 2026년 최신 yfinance 모듈은 .holdings를 통해 실시간 명단을 반환합니다.
-            # 데이터가 없을 경우를 대비해 2중 안전 장치(Negative Check) 가동
-            df_holdings = etf_obj.holdings
+            # 테이블 내의 모든 티커 추출
+            for link in soup.find_all('a', class_='hover-quote'):
+                sym = link.text.strip()
+                if sym and sym not in targets:
+                    targets.append(sym)
             
-            if df_holdings is None or df_holdings.empty:
-                # 홀딩스 직접 추출 실패 시 '지름길 금지' 원칙에 따라 공정 중단 보고
-                raise ValueError(f"❌ {target_etf} 실시간 명단 확보 불가 (수식 수정 요망)")
+            if not targets:
+                raise ValueError(f"{target_etf} 실시간 종목 명단 획득 실패")
+                
+            logging.info(f"✅ {target_etf} 현재 {len(targets)}개 종목 전수 확보 완료.")
 
-            # 티커 리스트만 추출 (상폐 종목은 이 명단에서 이미 제외됨)
-            raw_targets = df_holdings['Symbol'].dropna().unique().tolist()
-
-            # 3. [V40 병렬 타격] 생존 종목 검증 및 에너지 점수 산출
+            # 2. [V40 병렬 타격] 어제 종가 기준 에너지 산출
             def verify_and_score(sym):
                 try:
-                    # 상폐/거래정지 종목은 history 호출 시 데이터가 오지 않음
                     t = yf.Ticker(sym)
-                    h = t.history(period="2d", interval="1d", timeout=0.8)
-                    
+                    # [무결성] 어제(last_close)와 그저께(prev_close) 데이터만 사용
+                    h = t.history(period="2d", interval="1d", timeout=1.5)
                     if not h.empty and len(h) >= 2:
-                        curr = h['Close'].iloc[-1]
-                        prev = h['Close'].iloc[-2]
+                        prev_close = h['Close'].iloc[-2]
+                        last_close = h['Close'].iloc[-1]
                         
-                        # 0원 이하, NaN 등 논리적 모순 종목 즉시 컷 (Negative Check)
-                        if curr <= 0 or pd.isna(curr): return None
+                        if last_close <= 0 or pd.isna(last_close): return None
                         
-                        energy = (curr / prev) * 100
+                        energy = ((last_close / prev_close) - 1) * 100
                         return {"Symbol": sym, "Energy": round(energy, 2)}
                 except:
-                    return None # 에러 발생 시(상폐 등) 즉시 제명
+                    return None
                 return None
 
-            # 30개 병렬 스레드로 전수 조사 (No Shortcuts)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-                results = list(executor.map(verify_and_score, raw_targets))
+            # 50개 병렬 스레드로 전수 조사 가동
+            with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+                results = list(executor.map(verify_and_score, targets))
 
-            # 4. 결과 정제 및 상위 3개 확정
+            # 3. 데이터 정제 및 상위 3개 확정
             valid_results = [r for r in results if r is not None]
+            if not valid_results:
+                raise ValueError(f"⚠️ {ticker} 유효 데이터 추출 실패")
+
             top3 = sorted(valid_results, key=lambda x: x['Energy'], reverse=True)[:3]
 
-            # 데이터 부족 시 가짜 데이터 생성 금지
             while len(top3) < 3:
                 top3.append({"Symbol": "WAITING", "Energy": 0.0})
 
             return top3
 
         except Exception as e:
-            # 원칙 3: 에러 발생 시 가짜를 만들지 않고 즉시 보고
-            logging.error(f"⚠️ {ticker} 엔진 가동 중단: {str(e)}")
-            self.critical_sos(f"{ticker} 실시간 추출 공정 붕괴: {str(e)}")
+            logging.error(f"⚠️ {ticker} 전수조사 치명적 오류: {str(e)}")
+            self.critical_sos(f"{ticker} 실시간 명단 확보 불가 (수식 수정 요망)")
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
             
     # --------------------------------------------------------------------------
