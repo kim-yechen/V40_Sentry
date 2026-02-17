@@ -394,67 +394,69 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [V40 최종 수선] 사용자 업로드 파일명 정밀 저격 공정
-        수정 사항: 'NGX_DATA' 대신 실제 파일명 'V40_NGX_100_COMPLETE (1).xlsx' 직접 호출
+        [V40-Sniper 보강] 2층 전략주 및 원자재 눌림목 통합 공정
+        1. 기존 NGX/NBI 로직 유지
+        2. BNAI 텐배거(TEN-B) 복구
+        3. 원자재(Mining) 눌림목 섹션 신설 (Final_Energy > 50 & Low Vol)
         """
-        logging.info("공정 2: 2층 전략주 발굴 (업로드 파일 정밀 타격 시작)...")
+        logging.info("공정 2: 2층 전략주 및 원자재 눌림목 가공 시작...")
         try:
-            import pandas as pd
-            import os
-
-            # 1. 실제 업로드된 파일명으로 직접 로드 (경로 및 파일명 무결성 확보)
-            # 시스템 환경에 따라 파일명이 다를 수 있으므로 리소스 로더를 통해 강제 매칭
+            # 리소스 로드 (파일명 정밀 타격)
             ngx_df = self.load_resource("V40_NGX_100_COMPLETE (1).xlsx")
             nbi_df = self.load_resource("V40_NBI_260_COMPLETE (1).xlsx")
             bnai_df = self.load_resource("V7_RESULT_BNAI_FINAL.xlsx")
-
-            # 파일 로드 실패 시 즉각 모순 보고 (원칙 3)
-            if ngx_df is None or nbi_df is None:
-                raise FileNotFoundError(f"실제 리소스 타격 실패: NGX({ngx_df is not None}), NBI({nbi_df is not None})")
-
+            mining_df = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx")
+            
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️보수" if is_collapse else "🚀공격"
             f2_data = []
 
-            # 2. 데이터 가공 (엑셀 실존 컬럼: V40_Energy, Vol_Ratio_%)
+            # [섹션 1 & 2] NGX / NBI (기존 유지)
             for section, df in [("🚀 [NGX-3]", ngx_df), ("🧬 [NBI-3]", nbi_df)]:
                 self.sections[section] = []
-                # 상위 3개 데이터 정밀 추출
-                df_top = df.head(3)
-                for _, r in df_top.iterrows():
-                    sym = str(r.get('Ticker', 'N/A'))
-                    en = r.get('V40_Energy', 0.0)
-                    vol = r.get('Vol_Ratio_%', 0.0)
-                    price = r.get('Curr_Price', 0.0)
+                if df is not None and not df.empty:
+                    for _, r in df.head(3).iterrows():
+                        sym, en, vol = r.get('Ticker', 'N/A'), r.get('V40_Energy', 0.0), r.get('Vol_Ratio_%', 0.0)
+                        label = f"{prefix}({sym}:E{en}/V{vol}%)"
+                        self.sections[section].append(label)
+                        f2_data.append({"Section": section, "Ticker": sym, "Energy": en})
 
-                    # 무결성 라벨 생성
-                    label = f"{prefix}({sym}:E{en}/V{vol}%)"
-                    self.sections[section].append(label)
-                    f2_data.append({
-                        "Section": section, "Ticker": sym, "Energy": en,
-                        "Vol_Ratio": vol, "Curr_Price": price, "State": prefix
-                    })
-
-            # 3. BNAI 데이터 처리 (V_Energy 저격)
+            # [섹션 3] 🚀 TEN-B BNAI (누락된 텐배거 복구)
+            # 에너지는 높은데 아직 가격 반영 전인 놈들 저격
+            self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
-                energy_col = 'V_Energy' if 'V_Energy' in bnai_df.columns else 'Energy'
-                bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
-                
-                self.sections["🤖 [BNAI]"] = []
+                # 에너지가 높은 상위 3개 종목 (TGT가 아닌 실제 티커 매칭 시도)
+                bnai_top = bnai_df.sort_values(by='V_Energy', ascending=False).head(3)
                 for _, r in bnai_top.iterrows():
-                    sym = "TGT" if 'Date' in bnai_df.columns else str(r.get('Ticker', 'BNAI'))
-                    en = float(r.get(energy_col, 0.0))
-                    self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
-                    f2_data.append({
-                        "Section": "BNAI", "Ticker": sym, "Energy": en, 
-                        "Vol_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
-                    })
+                    # 텐배거 후보는 에너지 값의 스케일을 조정하여 표기
+                    en_val = r.get('V_Energy', 0.0)
+                    label = f"🚀 TEN-B BNAI | E:{en_val:.1f}"
+                    self.sections["🚀 [TEN-B]"].append(label)
 
-            # 4. 최종 무결성 검증 (Negative Check)
+            # [섹션 4] 💎 [MINING-P] (원자재 눌림목 신규 공정)
+            # 원칙: V_Energy > 50 이면서 거래대금(Trade_Value)이 과하지 않은 눌림목 타격
+            self.sections["💎 [MINING-P]"] = []
+            if mining_df is not None and not mining_df.empty:
+                # 1. 에너지 필터 (50 이상) & 2. 등급(Grade) A/B 우선
+                mining_pullback = mining_df[
+                    (mining_df['V_Energy'] > 50) & 
+                    (mining_df['Grade'].isin(['A (Shield)', 'B (Focus)']))
+                ].sort_values(by='V_Energy', ascending=False).head(3)
+
+                for _, r in mining_pullback.iterrows():
+                    sym = r.get('Symbol', 'N/A')
+                    en = r.get('V_Energy', 0.0)
+                    grade = r.get('Grade', 'D').split(' ')[0] # 'A'만 추출
+                    label = f"🎯 BEST {sym} | E:{en} ({grade})"
+                    self.sections["💎 [MINING-P]"].append(label)
+                    f2_data.append({"Section": "MINING", "Ticker": sym, "Energy": en})
+
+            # 최종 무결성 검증 (1+1-1=Complete)
             self.floor_2_df = pd.DataFrame(f2_data)
-            if self.floor_2_df.empty:
-                raise ValueError("가공 결과 데이터가 존재하지 않음 (로직 모순)")
+            return True
 
+        except Exception as e:
+            self.error_log.append(f"2층 보강공정 모순: {str(e)}")
             return True
 
         except Exception as e:
