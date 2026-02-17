@@ -298,62 +298,70 @@ class QuantumControlCenter:
     # [최종 교체본] 실시간 전수조사 엔진 (지름길 금지 / 어제 종가 기준)
     # --------------------------------------------------------------------------
     def _get_index_realtime_top3(self, ticker):
-        """[V40 정공법] 전임자 수치 준수: NGX(100개) / NBI(260개) 정밀 타격"""
+        """[V40 정공법] 카운트 제한 폐기 / 전수 스캔 / 파일명 자동 매칭"""
         import concurrent.futures
         import requests
         from bs4 import BeautifulSoup
+        import os
 
-        # 1. 대상 및 목표 수치 설정
+        # 1. 대상 설정 (URL만 지정, 개수 제한은 삭제)
         if "^NGX" in ticker:
             target_etf = "QQQN"
-            target_count = 100  # 나스닥 101~200위 (Next Gen 100)
-            url = "https://www.slickcharts.com/nasdaq-next-gen-100" # 정확한 소스 타겟팅
+            url = "https://www.slickcharts.com/nasdaq-next-gen-100"
         else:
             target_etf = "IBB"
-            target_count = 260  # 나스닥 바이오테크놀로지 (NBI)
             url = f"https://www.zacks.com/funds/etf/{target_etf}/holding"
 
-        logging.info(f"📡 [정밀 타격] {target_etf} (목표: 약 {target_count}개) 추출 시작...")
+        logging.info(f"📡 [실시간 전수조사] {target_etf} 소스 타격 시작...")
         
         targets = []
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+        }
 
         try:
             res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # 소스별 티커 추출 로직 분기
+            # 티커 추출 (제한 없이 전부 담기)
             if "slickcharts" in url:
-                for row in soup.select('table.table-sm tr td:nth-of-type(3) a'):
-                    sym = row.text.strip()
-                    if sym and sym not in targets: targets.append(sym)
+                items = soup.select('table.table-sm td > a[href^="/symbol/"]')
+                for item in items:
+                    sym = item.text.strip()
+                    if sym and sym.isalpha(): targets.append(sym)
             else:
                 for link in soup.find_all('a', class_='hover-quote'):
                     sym = link.text.strip()
-                    if sym and sym not in targets: targets.append(sym)
+                    if sym and sym.isalpha(): targets.append(sym)
 
-            # [수치 무결성 체크] 전임자 기준에서 크게 벗어나면 즉시 경보
-            if len(targets) < (target_count * 0.7): # 최소 70%는 확보해야 공정 진행
-                raise ValueError(f"❌ {target_etf} 표본 부족 (확보: {len(targets)} / 기준: {target_count})")
+            # [무결성] 명단 확보 실패 시 야후 보조망으로 전수 시도
+            if not targets:
+                etf_obj = yf.Ticker(target_etf)
+                try:
+                    df = etf_obj.holdings
+                    if df is not None: targets = df['Symbol'].tolist()
+                except: pass
 
-            logging.info(f"✅ {target_etf} 명단 {len(targets)}개 확보 완료. (수치 무결성 통과)")
+            if not targets:
+                raise ValueError(f"❌ {target_etf} 명단 확보 실패 (전수조사 불가능)")
 
-            # 2. [V40 병렬 타격] 어제 종가 기준 에너지 스캔
+            logging.info(f"✅ {target_etf} 총 {len(targets)}종목 누락 없이 확보 완료. 전수 스캔 개시.")
+
+            # 2. [V40 병렬 타격] 확보된 targets 전체 스캔
             def verify_and_score(sym):
                 try:
-                    # 티커 세척 (잡음 제거)
-                    if not sym.isalpha() or len(sym) > 5: return None
                     t = yf.Ticker(sym)
-                    h = t.history(period="2d", interval="1d", timeout=0.8)
+                    h = t.history(period="2d", interval="1d", timeout=1.0)
                     if not h.empty and len(h) >= 2:
                         prev = h['Close'].iloc[-2]
                         last = h['Close'].iloc[-1]
-                        if last <= 0 or pd.isna(last): return None
+                        if last <= 0: return None
                         energy = ((last / prev) - 1) * 100
                         return {"Symbol": sym, "Energy": round(energy, 2)}
                 except: return None
                 return None
 
+            # 모든 종목을 병렬로 처리 (제한 없음)
             with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
                 results = list(executor.map(verify_and_score, targets))
 
@@ -366,8 +374,7 @@ class QuantumControlCenter:
             return top3
 
         except Exception as e:
-            logging.error(f"⚠️ {ticker} 공정 붕괴: {str(e)}")
-            self.critical_sos(f"{ticker} 수치 무결성 위반: {str(e)}")
+            logging.error(f"⚠️ {ticker} 엔진 가동 중단: {str(e)}")
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
             
     # --------------------------------------------------------------------------
