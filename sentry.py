@@ -244,105 +244,70 @@ class QuantumControlCenter:
             self.error_log.append(f"1층 공정 오류: {str(e)}")
             return False
 
-    # --------------------------------------------------------------------------
-    # [3단계] 2층 12개 타겟 무결성 사냥 (Energy 명칭 통일 완료)
-    # --------------------------------------------------------------------------
-    # --------------------------------------------------------------------------
-    # [3단계] 2층 12개 타겟 무결성 사냥 (전수조사 모드)
-    # --------------------------------------------------------------------------
-    def process_floor_2(self):
-        logging.info("공정 3: 2층 전수조사 무결성 사냥 시작 (NGX/NBI 전 종목 스캔)...")
-        all_targets = []
-        files = os.listdir('.')
-
-        # 섹션 설정 및 파일 로드 (SHIELD/BEST/TEN-B)
-        sections_config = {"🛡️ [SHIELD]": "MINING", "🎯 [BEST]": "BEST", "🚀 [TEN-B]": "TEN_BAGGER"}
-
-        for sec_name, keyword in sections_config.items():
-            try:
-                target_file = next((f for f in files if keyword in f.upper()), None)
-                if target_file:
-                    df = self.load_resource(target_file)
-                    # 데이터 무결성 강제 보정 (Energy 이름표 통일 및 숫자화)
-                    df['Energy'] = pd.to_numeric(df['Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                    
-                    if "SHIELD" in sec_name:
-                        # Grade 컬럼 무결성 체크 후 필터링
-                        df['Grade'] = df['Grade'].astype(str)
-                        target_df = df[df['Grade'].str.contains('Shield', case=False, na=False)]
-                    else:
-                        target_df = df
-
-                    top3 = target_df.sort_values('Energy', ascending=False).head(3)
-                    res = []
-                    for _, r in top3.iterrows():
-                        res.append(f"{r['Symbol']} | E:{r['Energy']:,.1f}")
-                        all_targets.append({"Section": sec_name, "Symbol": r['Symbol'], "Energy": r['Energy']})
-                    self.sections[sec_name] = res if res else ["⚠️ 데이터없음"] * 3
-                else:
-                    self.sections[sec_name] = [f"❌ {keyword}파일누락"] * 3
-            except Exception as e:
-                logging.error(f"{sec_name} 붕괴: {e}")
-                self.sections[sec_name] = ["❌ 데이터붕괴"] * 3
-
-        # 실시간 지수 전수조사 (NGX-100 / NBI-전종목)
-        indices = [{"title": "🚀 [NGX-3]", "ticker": "^NGX"}, {"title": "🤖 [NBI-3]", "ticker": "^NBI"}]
-        for idx in indices:
-            try:
-                real_data = self._get_index_realtime_top3(idx['ticker'])
-                res = []
-                for r in real_data:
-                    res.append(f"{r['Symbol']} | Q:{r['Energy']:,.1f}")
-                    all_targets.append({"Section": idx['title'], "Symbol": r['Symbol'], "Energy": r['Energy']})
-                self.sections[idx['title']] = res
-            except Exception as e:
-                logging.error(f"{idx['title']} 실시간 통신 붕괴: {e}")
-                self.sections[idx['title']] = ["❌ 실시간통신오류"] * 3
-
-        self.floor_2_df = pd.DataFrame(all_targets)
-        return True
-
+    # 3번 #
     def _get_index_realtime_top3(self, ticker):
-        """[V40 무결성 엔진] NGX/NBI 전 종목 실시간 전수 스캔"""
+        """[V40 무결성 엔진] 하드코딩 폐기 / 실시간 ETF 홀딩스 직접 추출 방식"""
+        import concurrent.futures
+        
+        # 1. 대상 ETF 타격 지점 설정
+        target_etf = "QQQN" if "^NGX" in ticker else "IBB"
+        logging.info(f"📡 [실시간 관제] {target_etf} 구성 종목 직접 추출 중...")
+
         try:
-            if "^NGX" in ticker:
-                # NGX (Nasdaq Next Generation 100) 전수 리스트
-                targets = [
-                    'AACG', 'AAOI', 'AAPL', 'ABNB', 'ACAD', 'ADBE', 'ADSK', 'AEP', 'AFRM', 'AKAM', 'ALGN', 'ALNY', 'AMAT', 'AMGN', 'AMZN', 'ANSS', 'APP', 'ASML', 'ASND', 'ATCH', 'ATLAS', 'ATVI', 'AUR', 'AVGO', 'AXON', 'AZN', 'BBY', 'BDX', 'BIIB', 'BKNG', 'BMRN', 'BNTX', 'BURL', 'CASY', 'CDNS', 'CDW', 'CEG', 'CHKP', 'CHRW', 'CHTR', 'COHR', 'COIN', 'COST', 'CPRT', 'CPRT', 'CRWD', 'CSCO', 'CSX', 'CTAS', 'CTSH', 'DASH', 'DBX', 'DDOG', 'DLTR', 'DXCM', 'EA', 'EBAY', 'ENPH', 'ENTG', 'EXAS', 'EXPE', 'FANG', 'FAST', 'FICO', 'FISV', 'FTNT', 'GDDY', 'GILD', 'GOOG', 'GOOGL', 'GRMN', 'GWRE', 'HAS', 'HOOD', 'IDXX', 'ILMN', 'INTC', 'INTU', 'ISRG', 'JBHT', 'JKHY', 'KDP', 'KHC', 'KLAC', 'LNT', 'LRCX', 'LULU', 'MAR', 'MCHP', 'MDLZ', 'MELI', 'META', 'MNST', 'MPWR', 'MRNA', 'MRVL', 'MSFT', 'MU', 'NFLX', 'NOW', 'NVDA', 'NXPI', 'ODFL', 'OKTA', 'ON', 'ORLY', 'PANW', 'PAYX', 'PCAR', 'PDD', 'PEP', 'POOL', 'PYPL', 'QCOM', 'REGN', 'ROST', 'SBUX', 'SGEN', 'SIRI', 'SNPS', 'SPLK', 'SSNC', 'STX', 'SWKS', 'TEAM', 'TMUS', 'TSLA', 'TTD', 'TXN', 'VRSK', 'VRSN', 'VRTX', 'WBA', 'WBD', 'WDAY', 'WDC', 'WIX', 'XEL', 'ZM', 'ZS'
-                ]
-            else:
-                # NBI (Nasdaq Biotechnology) 주요 전 종목 리스트 (핵심 150개+ 대형주 전수)
-                targets = [
-                    'ABBV', 'ABOS', 'ACAD', 'ACET', 'ACRS', 'ADMA', 'ADPT', 'ADVM', 'AERI', 'AGIO', 'AKBA', 'AKERO', 'AKRO', 'ALBO', 'ALDX', 'ALEC', 'ALGN', 'ALGS', 'ALNY', 'ALPN', 'ALVR', 'AMGN', 'AMPH', 'AMRN', 'AMTI', 'ANAB', 'ANGI', 'ANNX', 'ANTX', 'APLS', 'APLT', 'APRE', 'ARAV', 'ARQT', 'ARRY', 'ARVN', 'ARWR', 'ASND', 'ASRT', 'ATAI', 'ATRA', 'ATXS', 'AUPH', 'AUR', 'AVDL', 'AVDX', 'AVEO', 'AVIR', 'AVRO', 'AXSM', 'BCAB', 'BCRX', 'BDTX', 'BEAM', 'BGNE', 'BIIB', 'BIOR', 'BLUE', 'BPMC', 'BMRN', 'BNGO', 'BNTX', 'BRKR', 'CABA', 'CARE', 'CARIB', 'CBAY', 'CCLD', 'CDNA', 'CDXC', 'CERE', 'CGEN', 'CGON', 'CHRS', 'CMRX', 'CNTG', 'COGT', 'COLL', 'CRBU', 'CRNX', 'CRSP', 'CRTO', 'CTMX', 'CTRE', 'CTRN', 'CVAC', 'CYTK', 'DNLI', 'DRNA', 'DYNE', 'EDIT', 'EFTR', 'ELVN', 'ENTA', 'EQ', 'ERAS', 'ETNB', 'EXAS', 'EXEL', 'FATE', 'FGEN', 'FHTX', 'FIXX', 'FMTX', 'FREQ', 'GERN', 'GILD', 'GLYC', 'GNPX', 'GRPH', 'GRTS', 'GTHX', 'HARP', 'HGEN', 'HLBZ', 'IBIO', 'IDYA', 'IGMS', 'IKNA', 'ILMN', 'IMCR', 'IMNM', 'IMTX', 'IMUX', 'IMVT', 'INAB', 'INCY', 'INMB', 'INSM', 'INST', 'IOVA', 'ISEE', 'IVVD', 'KNSA', 'KOD', 'KPTI', 'KRYS', 'KURA', 'KYMR', 'LBPH', 'LEGN', 'LGLS', 'LGND', 'LIFE', 'LIXT', 'LMNL', 'LNTH', 'LPTX', 'LYEL', 'MBRX', 'MCVT', 'MGTX', 'MGX', 'MIRM', 'MREO', 'MRNA', 'MRSN', 'MRTX', 'MTEM', 'MYGN', 'NBIX', 'NEO', 'NGM', 'NKTR', 'NKTX', 'NLTX', 'NMRA', 'NRIX', 'NTLA', 'NTRA', 'NUVB', 'NVAX', 'NVCR', 'NVTA', 'NXTC', 'OCGN', 'OMGA', 'ONTX', 'ORGO', 'ORIC', 'OTIC', 'OVV', 'PACB', 'PALI', 'PASG', 'PBYI', 'PCVX', 'PGEN', 'PHAT', 'PLRX', 'PMVP', 'PRLD', 'PRTA', 'PRTC', 'PRTG', 'PTGX', 'PTN', 'PYXS', 'QSI', 'RARE', 'RCEL', 'RCKT', 'REGEN', 'REGN', 'REPL', 'REPT', 'RGLS', 'RGNX', 'RIGL', 'RLAY', 'RLMD', 'RMNI', 'RNA', 'ROIV', 'RPTX', 'RRE', 'RVMD', 'RVNC', 'RXDX', 'SANA', 'SBTX', 'SDA', 'SDGR', 'SGEN', 'SINT', 'SMMT', 'SNY', 'SRRK', 'STOK', 'STTK', 'SUI', 'SUSA', 'SVRA', 'TALS', 'TCRR', 'TCS', 'TGTX', 'TIL', 'TKPY', 'TLSA', 'TMDX', 'TMCI', 'TNXP', 'TRDA', 'TRUP', 'TRVI', 'TSHA', 'TVTX', 'TWST', 'TYRA', 'UBX', 'URGN', 'VNDA', 'VRA', 'VRTX', 'VTYX', 'VYGR', 'WERP', 'XNCR', 'XOMA', 'YMTX', 'ZLAB', 'ZM', 'ZNTL'
-                ]
-
-            # 데이터 파상 공세 (timeout 설정으로 무한 대기 방지)
-            data = yf.download(targets, period='2d', interval='1d', progress=False, timeout=30)
+            # 2. [V40 직계 추출] 상폐 종목이 섞인 리스트가 아닌, 현재 시점 ETF 보유 종목만 획득
+            etf_obj = yf.Ticker(target_etf)
             
-            scored_list = []
-            for sym in targets:
+            # 2026년 최신 yfinance 모듈은 .holdings를 통해 실시간 명단을 반환합니다.
+            # 데이터가 없을 경우를 대비해 2중 안전 장치(Negative Check) 가동
+            df_holdings = etf_obj.holdings
+            
+            if df_holdings is None or df_holdings.empty:
+                # 홀딩스 직접 추출 실패 시 '지름길 금지' 원칙에 따라 공정 중단 보고
+                raise ValueError(f"❌ {target_etf} 실시간 명단 확보 불가 (수식 수정 요망)")
+
+            # 티커 리스트만 추출 (상폐 종목은 이 명단에서 이미 제외됨)
+            raw_targets = df_holdings['Symbol'].dropna().unique().tolist()
+
+            # 3. [V40 병렬 타격] 생존 종목 검증 및 에너지 점수 산출
+            def verify_and_score(sym):
                 try:
-                    if sym in data['Close'].columns:
-                        df = data['Close'][sym].dropna()
-                        if len(df) >= 2:
-                            # [통일] Score를 Energy로 즉시 계산
-                            val = (df.iloc[-1] / df.iloc[-2]) * 100
-                            scored_list.append({"Symbol": sym, "Energy": round(val, 2)})
-                except: continue
-            
-            # 상위 3개 선별
-            top3 = sorted(scored_list, key=lambda x: x['Energy'], reverse=True)[:3]
-            return top3 if top3 else [{"Symbol": "NODATA", "Energy": 0.0}] * 3
-            
-        except Exception as e:
-            logging.error(f"전수조사 엔진 가동 중단: {e}")
-            return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
+                    # 상폐/거래정지 종목은 history 호출 시 데이터가 오지 않음
+                    t = yf.Ticker(sym)
+                    h = t.history(period="2d", interval="1d", timeout=0.8)
+                    
+                    if not h.empty and len(h) >= 2:
+                        curr = h['Close'].iloc[-1]
+                        prev = h['Close'].iloc[-2]
+                        
+                        # 0원 이하, NaN 등 논리적 모순 종목 즉시 컷 (Negative Check)
+                        if curr <= 0 or pd.isna(curr): return None
+                        
+                        energy = (curr / prev) * 100
+                        return {"Symbol": sym, "Energy": round(energy, 2)}
+                except:
+                    return None # 에러 발생 시(상폐 등) 즉시 제명
+                return None
 
-    # (이다음에 finalize_and_report 함수가 오면 됩니다)
-    
-    # --------------------------------------------------------------------------
-    # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
-    # --------------------------------------------------------------------------
+            # 30개 병렬 스레드로 전수 조사 (No Shortcuts)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+                results = list(executor.map(verify_and_score, raw_targets))
+
+            # 4. 결과 정제 및 상위 3개 확정
+            valid_results = [r for r in results if r is not None]
+            top3 = sorted(valid_results, key=lambda x: x['Energy'], reverse=True)[:3]
+
+            # 데이터 부족 시 가짜 데이터 생성 금지
+            while len(top3) < 3:
+                top3.append({"Symbol": "WAITING", "Energy": 0.0})
+
+            return top3
+
+        except Exception as e:
+            # 원칙 3: 에러 발생 시 가짜를 만들지 않고 즉시 보고
+            logging.error(f"⚠️ {ticker} 엔진 가동 중단: {str(e)}")
+            self.critical_sos(f"{ticker} 실시간 추출 공정 붕괴: {str(e)}")
+            return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
+            
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
