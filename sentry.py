@@ -253,7 +253,7 @@ class QuantumControlCenter:
         files = [f for f in os.listdir('.') if f.lower().endswith(('.csv', '.xlsx'))]
 
         # ---------------------------------------------------------
-        # SECTION 1: SHIELD (MINING 파일 기반)
+        # SECTION 1: SHIELD (MINING 파일 기반) - 보정 완료
         # ---------------------------------------------------------
         try:
             m_df = None
@@ -263,17 +263,25 @@ class QuantumControlCenter:
                     break
             
             if m_df is not None:
-                # [정밀정제] V_Energy 컬럼 찾기 및 숫자 변환 (형님 원칙 2: Negative Check)
-                m_df['Clean_Score'] = pd.to_numeric(m_df['V_Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                # 'Shield' 등급만 필터링
-                shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
-                top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
+                # [무결성 보정] 'V_Energy'라는 글자가 포함된 모든 컬럼 중 첫 번째를 자동으로 잡습니다.
+                # 이렇게 하면 앞에 공백이 있든, 소문자든 무조건 잡아냅니다.
+                energy_col = next((c for c in m_df.columns if 'V_ENERGY' in c.upper().strip()), None)
                 
-                res = []
-                for _, r in top3.iterrows():
-                    res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
-                    all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
-                self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
+                if energy_col:
+                    m_df['Clean_Score'] = pd.to_numeric(m_df[energy_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    
+                    # 'Shield' 등급 필터링
+                    shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
+                    top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
+                    
+                    res = []
+                    for _, r in top3.iterrows():
+                        res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
+                        all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
+                    self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
+                else:
+                    # 컬럼을 못 찾으면 형님께 즉시 SOS (원칙 3 준수)
+                    raise KeyError(f"형님, MINING 파일에 'V_Energy' 컬럼이 안 보입니다. 확인 바랍니다.")
             else:
                 self.sections["🛡️ [SHIELD]"] = ["❌ MINING파일누락"] * 3
         except Exception as e:
