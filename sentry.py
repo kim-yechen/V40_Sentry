@@ -243,101 +243,127 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [공정 3] 형님의 완벽한 의도 구현
-        1. SHIELD -> MINING 리포트 참조 (FNV, WPM 등)
-        2. 포맷 -> 'Symbol | Q:Score' 형식 준수
-        3. 소스 매핑 정확화
+        [공정 3] 2층 12개 타겟 정밀 해체 (무결성 풀버전)
+        1+1-1=Complete 원칙에 따라 분석+처리+저장 후 보고.
         """
-        logging.info("공정 3: 2층 타겟 소스 재매핑 및 정밀 해체 가동...")
+        logging.info("공정 3: 2층 하이브리드(파일+실시간) 정밀 타격 가동...")
         
-        # [핵심] 형님의 파일과 섹션을 정확히 1:1 매칭
-        configs = [
-            # SHIELD는 이제 'MINING' 파일(V7C...)을 봅니다.
-            {"title": "🛡️ [SHIELD]", "key": "MINING", "score_keys": ["V_Energy", "Q_Score"], "id_keys": ["Symbol"]},
-            # BEST는 기존 BEST 파일 유지
-            {"title": "🎯 [BEST]", "key": "BEST", "score_keys": ["V_Energy", "Q_Score"], "id_keys": ["Ticker", "Symbol"]},
-            # NGX(Next Gen 100)는 TEN_BAGGER 파일에서 추출
-            {"title": "🚀 [NGX-3]", "key": "TEN_BAGGER", "score_keys": ["Q_Score", "V_Energy"], "id_keys": ["Symbol"]},
-            # NBI는 파일이 없으므로, 일단 BEST/TEN_BAGGER 등에서 바이오 관련주가 있다면 추출 시도 (임시 조치)
-            {"title": "🤖 [NBI-3]", "key": "BNAI_STOCKS", "score_keys": ["Q_Score"], "id_keys": ["Symbol"]}
-        ]
-        
-        # NBI 데이터 병목 해결을 위한 예외처리 맵
-        # (NBI 파일이 없으면 TEN_BAGGER 파일을 대신 읽되 로직 분리)
-        fallback_map = {"BNAI_STOCKS": "TEN_BAGGER"} 
-        
-        all_targets = []
         import os
+        all_targets = []
         files = [f for f in os.listdir('.') if f.lower().endswith(('.csv', '.xlsx'))]
 
-        for cfg in configs:
-            try:
-                target_df = None
-                search_key = cfg['key']
-                
-                # 파일 찾기
-                for f in files:
-                    if search_key in f:
-                        target_df = self.load_resource(f)
-                        break
-                
-                # NBI 파일이 없어서 대타(TEN_BAGGER)를 써야 할 경우
-                if target_df is None and search_key in fallback_map:
-                    alt_key = fallback_map[search_key]
-                    for f in files:
-                        if alt_key in f:
-                            target_df = self.load_resource(f)
-                            break
-
-                if target_df is None:
-                    self.sections[cfg['title']] = ["❌ 소스파일누락"] * 3
-                    continue
-
-                # 컬럼 매핑
-                score_col = next((c for c in target_df.columns if any(k in c for k in cfg['score_keys'])), None)
-                id_col = next((c for c in target_df.columns if any(k in c for k in cfg['id_keys'])), target_df.columns[0])
-                
-                if not score_col: raise KeyError("점수 컬럼 실종")
-
-                # 데이터 정제 (DataFrame 중복 방지 포함)
-                raw_s = target_df[score_col]
-                if isinstance(raw_s, pd.DataFrame): raw_s = raw_s.iloc[:, 0]
-                
-                target_df['Clean_Score'] = pd.to_numeric(
-                    raw_s.astype(str).str.replace(',', '').str.strip(), errors='coerce'
-                ).fillna(0)
-                
-                # 정렬 및 3개 추출
-                top3 = target_df.sort_values(by='Clean_Score', ascending=False).head(3)
+        # ---------------------------------------------------------
+        # SECTION 1: SHIELD (MINING 파일 기반)
+        # ---------------------------------------------------------
+        try:
+            m_df = None
+            for f in files:
+                if "MINING" in f.upper():
+                    m_df = self.load_resource(f)
+                    break
+            
+            if m_df is not None:
+                # [정밀정제] V_Energy 컬럼 찾기 및 숫자 변환 (형님 원칙 2: Negative Check)
+                m_df['Clean_Score'] = pd.to_numeric(m_df['V_Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                # 'Shield' 등급만 필터링
+                shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
+                top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
                 
                 res = []
-                for _, row in top3.iterrows():
-                    # ID 추출
-                    s_val = row[id_col]
-                    s = str(s_val.iloc[0] if isinstance(s_val, pd.Series) else s_val).strip()
-                    
-                    # 점수 추출
-                    v = row['Clean_Score']
-                    if isinstance(v, pd.Series): v = v.iloc[0]
+                for _, r in top3.iterrows():
+                    res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
+                    all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
+                self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
+            else:
+                self.sections["🛡️ [SHIELD]"] = ["❌ MINING파일누락"] * 3
+        except Exception as e:
+            logging.error(f"SHIELD 공정 실패: {e}")
+            self.sections["🛡️ [SHIELD]"] = ["❌ 데이터붕괴"] * 3
 
-                    # 형님의 포맷 요구사항: Symbol | Q:Score
-                    f_val = f"{v/1000000:.1f}M" if v >= 1000000 else f"{v:,.1f}" # 1M 이상은 M표기, 아니면 콤마
-                    
-                    # 결과 문자열 완성
-                    final_str = f"{s} | Q:{row['Clean_Score']:.2f}" # 원본 숫자 그대로 요청 시
-                    # 가독성을 위해 M단위 변환이 필요하면 위 f_val 사용, 형님 예시는 Q:숫자 그대로라 아래 사용
-                    
-                    # 형님 예시: Q:145.91 처럼 나오게 (점수가 작을때), 크면 Q:48438050...
-                    res.append(f"{s} | Q:{v:,.2f}") 
-                    all_targets.append({"Section": cfg['title'], "Symbol": s, "Energy": v})
+        # ---------------------------------------------------------
+        # SECTION 2: BEST (BEST 파일 기반)
+        # ---------------------------------------------------------
+        try:
+            b_df = None
+            for f in files:
+                if "BEST" in f.upper():
+                    b_df = self.load_resource(f)
+                    break
+            
+            if b_df is not None:
+                b_df['Clean_Score'] = pd.to_numeric(b_df['V_Energy'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                top3 = b_df.sort_values('Clean_Score', ascending=False).head(3)
                 
-                self.sections[cfg['title']] = res
+                res = []
+                for _, r in top3.iterrows():
+                    # Ticker 또는 Symbol 컬럼 유동적 대응
+                    sid = r['Ticker'] if 'Ticker' in b_df.columns else r['Symbol']
+                    res.append(f"{sid} | E:{r['Clean_Score']:,.1f}")
+                    all_targets.append({"Section": "🎯 [BEST]", "Symbol": sid, "Energy": r['Clean_Score']})
+                self.sections["🎯 [BEST]"] = res
+            else:
+                self.sections["🎯 [BEST]"] = ["❌ BEST파일누락"] * 3
+        except Exception as e:
+            self.sections["🎯 [BEST]"] = ["❌ 데이터붕괴"] * 3
 
-            except Exception as e:
-                logging.error(f"🚨 {cfg['title']} 처리 실패: {e}")
-                self.sections[cfg['title']] = ["❌ 데이터붕괴"] * 3
+        # ---------------------------------------------------------
+        # SECTION 3: TEN-B (TEN_BAGGER 파일 기반)
+        # ---------------------------------------------------------
+        try:
+            t_df = None
+            for f in files:
+                if "TEN_BAGGER" in f.upper():
+                    t_df = self.load_resource(f)
+                    break
+            
+            if t_df is not None:
+                t_df['Clean_Score'] = pd.to_numeric(t_df['Q_Score'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                top3 = t_df.sort_values('Clean_Score', ascending=False).head(3)
+                
+                res = []
+                for _, r in top3.iterrows():
+                    res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
+                    all_targets.append({"Section": "🚀 [TEN-B]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
+                self.sections["🚀 [TEN-B]"] = res
+            else:
+                self.sections["🚀 [TEN-B]"] = ["❌ TEN_BAGGER파일누락"] * 3
+        except Exception as e:
+            self.sections["🚀 [TEN-B]"] = ["❌ 데이터붕괴"] * 3
 
+        # ---------------------------------------------------------
+        # SECTION 4: 실시간 지수 돌파 (NGX-3, NBI-3)
+        # ---------------------------------------------------------
+        # 형님, 여기는 파일이 없어도 제가 실시간으로 긁어옵니다. (표본조사 절대 금지)
+        indices = [
+            {"title": "🚀 [NGX-3]", "ticker": "^NGX", "count": 100},
+            {"title": "🤖 [NBI-3]", "ticker": "^NBI", "count": 260}
+        ]
+
+        for idx in indices:
+            logging.info(f"실시간 {idx['title']} {idx['count']}개 종목 전수 스캐닝...")
+            try:
+                # 실제 API를 통한 실시간 에너지 랭킹 획득 (추측 금지)
+                real_data = self._get_index_realtime_top3(idx['ticker'])
+                
+                res = []
+                for r in real_data:
+                    res.append(f"{r['Symbol']} | Q:{r['Score']:,.1f}")
+                    all_targets.append({"Section": idx['title'], "Symbol": r['Symbol'], "Energy": r['Score']})
+                self.sections[idx['title']] = res
+            except:
+                self.sections[idx['title']] = ["❌ 실시간통신오류"] * 3
+
+        # ---------------------------------------------------------
+        # 최종 단계: 파일 저장 (1+1-1=Complete)
+        # ---------------------------------------------------------
         self.floor_2_df = pd.DataFrame(all_targets)
+        # 저장 전 데이터 공통 검증 (Negative Check)
+        if (self.floor_2_df['Energy'] < 0).any():
+            logging.warning("⚠️ 경고: 음수 에너지 데이터 감지됨. 로직 재검토 필요.")
+        
+        self.save_to_excel(self.floor_2_df, "FLOOR_2_ANALYSIS_REPORT.xlsx")
+        logging.info("공정 3 완료 및 엑셀 저장 성공.")
+        
         return True
         
     # --------------------------------------------------------------------------
@@ -414,26 +440,29 @@ class QuantumControlCenter:
                     cell.alignment = Alignment(horizontal="center")
 
     def dispatch(self, filename):
-        """텔레그램 최종 전송"""
+        """텔레그램 최종 전송 (평일 위급상황 대응 + 토요일 정기 전송)"""
         try:
-            # 텍스트 전송
+            kst = datetime.utcnow() + timedelta(hours=9)
+            is_saturday = (kst.weekday() == 5)
+            
             base_url = f"https://api.telegram.org/bot{self.t_token}"
+            
+            # 1. 텍스트 보고서는 어떤 상황이든 매일 전송
             requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": self.analysis_report})
             
-            # 파일 전송 (강제 보정 스위치 활성화 시 필수 전송)
-            if self.macro_v8_switch >= 1 or self.v7_p > 50:
+            # 2. 파일 전송 로직 (형님 기존 로직 + 토요일 조건 결합)
+            # 조건: (토요일인가?) OR (강제보정 스위치가 켜졌는가?) OR (V7 예측값이 위험한가?)
+            if is_saturday or self.macro_v8_switch >= 1 or self.v7_p > 50:
                 with open(filename, 'rb') as f:
                     requests.post(f"{base_url}/sendDocument", data={"chat_id": self.chat_id}, files={'document': f})
-        except:
-            print("⚠️ 텔레그램 전송 실패")
-
-    def critical_sos(self, msg):
-        """치명적 오류 시 형님께 SOS"""
-        try:
-            requests.post(f"https://api.telegram.org/bot{self.t_token}/sendMessage", 
-                          data={"chat_id": self.chat_id, "text": f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"})
-        except: pass
-
+                
+                reason = "📅 토요일 정기" if is_saturday else "🚨 위급 상황"
+                logging.info(f"{reason} 무결성 엑셀 파일 전송 완료")
+            else:
+                logging.info(f"📅 평일 일반 상황이므로 텍스트 보고만 수행합니다.")
+                
+        except Exception as e:
+            self.critical_sos(f"텔레그램 전송 중 붕괴 발생: {e}")
     # --------------------------------------------------------------------------
     # [메인 실행]
     # --------------------------------------------------------------------------
