@@ -218,105 +218,98 @@ class QuantumControlCenter:
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
     # --------------------------------------------------------------------------
-    # [1단계] 매크로 스펙트럼 분석 (V8 스위치 개입)
+    # [V40 완성형] 공정 1: 매크로 파동 분석 및 상관계수 역산
     # --------------------------------------------------------------------------
     def process_macro(self):
-        logging.info("공정 1: 매크로 분석 및 스위치 보정 시작...")
+        logging.info("공정 1: V40 파동붕괴 분석 및 상관계수 역산 시작...")
         try:
+            # 1. 기초 데이터 로드 (V8 REVISION)
             v8_data = self.load_resource("V8_REVISION_FINAL")
-            # 컬럼 매칭 로직 강화
             col = next((c for c in v8_data.columns if any(x in c for x in ['Cash', 'Ratio', 'V8'])), None)
-            if not col: raise KeyError("현금 비중 컬럼을 찾을 수 없습니다.")
-            
-            raw_v8 = v8_data[col].iloc[-1]
-            if not self.validate_data(raw_v8, "V8_RAW", min_val=0): 
-                raise ValueError("V8 수치 모순")
+            if not col: raise KeyError("V8 현금 비중 컬럼 누락")
 
+            # 2. 파동붕괴 수치 확정 (V8 우세 판정)
+            raw_v8 = v8_data[col].iloc[-1]
             self.v8_p = raw_v8 * 100 if raw_v8 <= 1.0 else raw_v8
             
+            # [V8 스위치] 강제 개입 로직
             if self.macro_v8_switch >= 2:
                 self.v8_p = max(self.v8_p, 60.0)
-                logging.info(f"🛡️ 보호 모드 가동: V8 최소선 60% 상향 고정")
-
             self.v7_p = 100 - self.v8_p
-            
-            if self.v8_p >= 70: self.market_state = "🚨 [극심한 공포] 전량 현금화 검토"
-            elif self.v8_p >= 55: self.market_state = "🛡️ [보수적 수비] 현금 우위 유지"
-            elif self.v8_p >= 45: self.market_state = "⚖️ [중립] 지수 방향성 탐색"
-            else: self.market_state = "🔥 [적극 공격] 모멘텀 종목 비중 확대"
+
+            # 3. [형님 제안] V7C(물리)-NGX(기술) 상관계수 역산
+            # 물리(원자재)와 디지털(신기술)의 에너지 전이를 추적합니다.
+            try:
+                # NGX0(신기술)와 V7C(에너지)의 최근 60일 데이터
+                ngx_price = yf.download("^NGX", period="60d", progress=False)['Close']
+                v7c_energy = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT")['V_Energy'].tail(60)
+                
+                # 데이터 길이 맞춤 후 상관계수 계산
+                combined = pd.concat([ngx_price, v7c_energy], axis=1).dropna()
+                self.correlation = combined.corr().iloc[0, 1]
+                
+                # 상관계수가 극단적 마이너스(-)면 파동 붕괴 가속화 (자본 이동)
+                if self.correlation < -0.7:
+                    self.v8_p += abs(self.correlation) * 5 # V8 위험 가중치 상향
+                    self.market_state = "🚨 [에너지 대전이] 원자재->신기술 자본 이동"
+            except:
+                self.correlation = 0.0
+                logging.warning("⚠️ 상관계수 역산 실패 (데이터 부족)")
+
+            # 4. 최종 시장 상태 판정
+            if self.v8_p >= 60: 
+                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 가동 (생존 최우선)"
+            else:
+                self.market_state = "🔥 [V7 질서] 평시 시나리오 가동 (수익 극대화)"
 
             self.fetch_market_indices()
             return True
         except Exception as e:
-            self.error_log.append(f"매크로 공정 오류: {str(e)}")
+            self.error_log.append(f"매크로 분석 결함: {str(e)}")
             return False
 
-    def fetch_market_indices(self):
-        try:
-            tickers = yf.download(['^NBI', '^NGX'], period='5d', interval='1d', progress=False)
-            if tickers.empty: return
-            
-            # yfinance 버전 이슈 대응 (멀티인덱스 처리)
-            try:
-                nbi_close = tickers['Close']['^NBI']
-                ngx_close = tickers['Close']['^NGX']
-            except KeyError:
-                # 단일 레벨 컬럼일 경우
-                nbi_close = tickers['^NBI']['Close'] if '^NBI' in tickers else tickers['Close']
-                ngx_close = tickers['^NGX']['Close'] if '^NGX' in tickers else tickers['Close']
-
-            for t_name, series in [('NBI', nbi_close), ('NGX', ngx_close)]:
-                if len(series) >= 2:
-                    curr = series.iloc[-1]
-                    prev = series.iloc[-2]
-                    chg = ((curr / prev) - 1) * 100
-                    self.indices_data[t_name] = (curr, chg)
-        except:
-            logging.warning("지수 호출 실패 (네트워크 점검 요망)")
-
     # --------------------------------------------------------------------------
-    # [2단계] 1층 보유주 기술적 진단
+    # [V40 완성형] 공정 2: 1층 보유주 점검 (V8 생존 라인 상향 적용)
     # --------------------------------------------------------------------------
     def process_floor_1(self):
-        logging.info("공정 2: 1층 보유주 기술적 무결성 점검...")
+        logging.info(f"공정 2: 1층 진단 (파동 상태: {self.market_state})")
         portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
         results = []
         
+        # [V8 붕괴 체크]
+        is_v8_dominant = self.v8_p >= 60.0
+        
         try:
             raw = yf.download(portfolio, period='1y', group_by='ticker', progress=False)
-            
             for sym in portfolio:
-                try:
-                    df = raw[sym].dropna()
-                    if len(df) < 120: 
-                        results.append({"Symbol": sym, "Action": "⚠️ 데이터부족", "Icon": "📉", "Gap": 0, "DD": 0})
-                        continue
+                df = raw[sym].dropna()
+                if df.empty: continue
+                
+                price = df['Close'].iloc[-1]
+                ma120 = df['Close'].rolling(120).mean().iloc[-1]
+                gap = ((price / ma120) - 1) * 100
+                
+                # --- [V40 시나리오 연동 알고리즘] ---
+                # V8 붕괴 시에는 '진짜 대장주'만 남기고 다 쳐내는 생존 라인 가동
+                if is_v8_dominant:
+                    overheat_limit = 60.0  # 형님 제안: 익절 라인을 높여서 폭주하는 대장주 끝까지 먹기
+                    exit_margin = 1.05    # 120일선 위 5% 여유 있을 때 미리 탈출
                     
-                    price = df['Close'].iloc[-1]
-                    ma120 = df['Close'].rolling(120).mean().iloc[-1]
-                    high_20 = df['Close'].rolling(20).max().iloc[-1]
-                    
-                    if not self.validate_data(price, f"{sym}_PRICE", min_val=0.001): continue
-                    
-                    gap = ((price / ma120) - 1) * 100
-                    mdd = ((price / high_20) - 1) * 100
-                    
+                    if price < ma120 * exit_margin: action, icon = "🔴 [위기매도]", "🚨"
+                    elif gap > overheat_limit: action, icon = "🟡 [보수익절]", "💰"
+                    else: action, icon = "🛡️ [방어홀딩]", "💎"
+                else:
+                    # V7 평시 시나리오
                     if price < ma120: action, icon = "🔴 [전량매도]", "💀"
-                    elif mdd < -12.5: action, icon = "🟠 [트레일링]", "🏃"
                     elif gap > 35.0: action, icon = "🟡 [과열분할]", "⚠️"
                     else: action, icon = "🟢 [강력홀딩]", "💎"
-                    
-                    results.append({
-                        "Symbol": sym, "Action": action, "Icon": icon, 
-                        "Gap": round(gap, 2), "DD": round(mdd, 2), "Price": round(price, 2)
-                    })
-                except:
-                    results.append({"Symbol": sym, "Action": "⚠️ 점검불가", "Icon": "❓", "Gap": 0, "DD": 0})
+                
+                results.append({"Symbol": sym, "Action": action, "Icon": icon, "Gap": round(gap, 2)})
             
             self.floor_1_df = pd.DataFrame(results)
             return True
         except Exception as e:
-            self.error_log.append(f"1층 공정 오류: {str(e)}")
+            logging.error(f"1층 공정 결함: {e}")
             return False
 
     # --------------------------------------------------------------------------
