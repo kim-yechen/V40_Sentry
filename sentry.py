@@ -298,83 +298,77 @@ class QuantumControlCenter:
     # [최종 교체본] 실시간 전수조사 엔진 (지름길 금지 / 어제 종가 기준)
     # --------------------------------------------------------------------------
     def _get_index_realtime_top3(self, ticker):
-        """[V40 무결성] 나스닥 공식/Zacks/Yahoo 3중 타격 - 전수 명단 확보 로직"""
+        """[V40 정공법] 전임자 수치 준수: NGX(100개) / NBI(260개) 정밀 타격"""
         import concurrent.futures
         import requests
         from bs4 import BeautifulSoup
 
-        target_etf = "QQQN" if "^NGX" in ticker else "IBB"
-        logging.info(f"📡 [실시간 전수조사] {target_etf} 명단 확보 공정 가동...")
+        # 1. 대상 및 목표 수치 설정
+        if "^NGX" in ticker:
+            target_etf = "QQQN"
+            target_count = 100  # 나스닥 101~200위 (Next Gen 100)
+            url = "https://www.slickcharts.com/nasdaq-next-gen-100" # 정확한 소스 타겟팅
+        else:
+            target_etf = "IBB"
+            target_count = 260  # 나스닥 바이오테크놀로지 (NBI)
+            url = f"https://www.zacks.com/funds/etf/{target_etf}/holding"
+
+        logging.info(f"📡 [정밀 타격] {target_etf} (목표: 약 {target_count}개) 추출 시작...")
         
         targets = []
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-        # --- [공정 1: 나스닥 공식/Slickcharts 타격] ---
         try:
-            if not targets:
-                # 나스닥 100/Next Gen 실시간 명단을 가장 잘 반영하는 데이터 허브
-                url = f"https://www.slickcharts.com/nasdaq100" if target_etf == "QQQN" else "https://www.slickcharts.com/sp500" 
-                # (IBB/NGX 특성에 맞는 페이지로 동적 타격)
-                res = requests.get(url, headers=headers, timeout=5)
-                soup = BeautifulSoup(res.text, 'html.parser')
+            res = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # 소스별 티커 추출 로직 분기
+            if "slickcharts" in url:
                 for row in soup.select('table.table-sm tr td:nth-of-type(3) a'):
                     sym = row.text.strip()
                     if sym and sym not in targets: targets.append(sym)
-                if targets: logging.info(f"✅ 공정1(Slick)에서 {len(targets)}종목 확보")
-        except: pass
-
-        # --- [공정 2: Zacks 타격 (기존 로직 보강)] ---
-        if not targets:
-            try:
-                url = f"https://www.zacks.com/funds/etf/{target_etf}/holding"
-                res = requests.get(url, headers=headers, timeout=5)
-                soup = BeautifulSoup(res.text, 'html.parser')
+            else:
                 for link in soup.find_all('a', class_='hover-quote'):
                     sym = link.text.strip()
                     if sym and sym not in targets: targets.append(sym)
-                if targets: logging.info(f"✅ 공정2(Zacks)에서 {len(targets)}종목 확보")
-            except: pass
 
-        # --- [공정 3: Yahoo Finance 직접 타격] ---
-        if not targets:
-            try:
-                etf_obj = yf.Ticker(target_etf)
-                # yfinance의 내부 holdings 데이터가 열려있는지 확인
-                holdings = etf_obj.holdings
-                if holdings is not None and not holdings.empty:
-                    targets = holdings['Symbol'].tolist()
-                if targets: logging.info(f"✅ 공정3(Yahoo)에서 {len(targets)}종목 확보")
-            except: pass
+            # [수치 무결성 체크] 전임자 기준에서 크게 벗어나면 즉시 경보
+            if len(targets) < (target_count * 0.7): # 최소 70%는 확보해야 공정 진행
+                raise ValueError(f"❌ {target_etf} 표본 부족 (확보: {len(targets)} / 기준: {target_count})")
 
-        # [원칙 3] 지름길 금지: 모든 소스 붕괴 시 가짜 데이터 없이 즉시 보고
-        if not targets:
-            raise ValueError(f"❌ {target_etf} 전수 명단 확보 실패 (나스닥/Zacks/Yahoo 전 소스 차단)")
+            logging.info(f"✅ {target_etf} 명단 {len(targets)}개 확보 완료. (수치 무결성 통과)")
 
-        # --- [에너지 스캔] 어제 종가 기준 전수 조사 (동일) ---
-        logging.info(f"🚀 {len(targets)}개 종목 전수 에너지 스캔 시작...")
-        def verify_and_score(sym):
-            try:
-                t = yf.Ticker(sym)
-                h = t.history(period="2d", interval="1d", timeout=0.8)
-                if not h.empty and len(h) >= 2:
-                    prev = h['Close'].iloc[-2]
-                    last = h['Close'].iloc[-1]
-                    if last <= 0: return None
-                    energy = ((last / prev) - 1) * 100
-                    return {"Symbol": sym, "Energy": round(energy, 2)}
-            except: return None
-            return None
+            # 2. [V40 병렬 타격] 어제 종가 기준 에너지 스캔
+            def verify_and_score(sym):
+                try:
+                    # 티커 세척 (잡음 제거)
+                    if not sym.isalpha() or len(sym) > 5: return None
+                    t = yf.Ticker(sym)
+                    h = t.history(period="2d", interval="1d", timeout=0.8)
+                    if not h.empty and len(h) >= 2:
+                        prev = h['Close'].iloc[-2]
+                        last = h['Close'].iloc[-1]
+                        if last <= 0 or pd.isna(last): return None
+                        energy = ((last / prev) - 1) * 100
+                        return {"Symbol": sym, "Energy": round(energy, 2)}
+                except: return None
+                return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-            results = list(executor.map(verify_and_score, targets))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+                results = list(executor.map(verify_and_score, targets))
 
-        valid_results = [r for r in results if r is not None]
-        top3 = sorted(valid_results, key=lambda x: x['Energy'], reverse=True)[:3]
-        
-        while len(top3) < 3:
-            top3.append({"Symbol": "WAITING", "Energy": 0.0})
+            valid_results = [r for r in results if r is not None]
+            top3 = sorted(valid_results, key=lambda x: x['Energy'], reverse=True)[:3]
+            
+            while len(top3) < 3:
+                top3.append({"Symbol": "WAITING", "Energy": 0.0})
 
-        return top3
+            return top3
+
+        except Exception as e:
+            logging.error(f"⚠️ {ticker} 공정 붕괴: {str(e)}")
+            self.critical_sos(f"{ticker} 수치 무결성 위반: {str(e)}")
+            return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
             
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
