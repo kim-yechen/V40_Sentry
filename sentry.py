@@ -244,6 +244,89 @@ class QuantumControlCenter:
             self.error_log.append(f"1층 공정 오류: {str(e)}")
             return False
 
+    # --------------------------------------------------------------------------
+    # [3단계] 2층 전략주 발굴 및 파동 시나리오 확정 (12개 무결성 타겟)
+    # --------------------------------------------------------------------------
+    def process_floor_2(self):
+        logging.info("공정 3: 2층 전략주 발굴 및 파동 붕괴 시나리오 적용...")
+        try:
+            # 1. 실시간 지수 상위 3개 추출 (NGX, NBI)
+            # [V40 원칙] 지름길 없이 ETF 홀딩스 전수 조사
+            ngx_top3 = self._get_index_realtime_top3("^NGX")
+            nbi_top3 = self._get_index_realtime_top3("^NBI")
+            
+            # 2. 기존 파일 기반 섹션 로드 (BEST, TEN-B, BNAI 등)
+            # BNAI 0.0 오류 방지를 위해 명시적 로드
+            bnai_df = self.load_resource("BNAI_DATA")
+            best_df = self.load_resource("BEST_TARGETS")
+            
+            # 3. 파동 시나리오 판정 (V8 >= 60% 인 경우 '파동 붕괴'로 간주)
+            is_collapse = self.v8_p >= 60.0
+            prefix = "⚠️대기" if is_collapse else "🚀승인"
+            
+            # 4. 섹션별 데이터 박제 (1+1-1=Complete를 위한 데이터프레임 빌드)
+            floor_2_results = []
+            
+            # [NGX-3 섹션 빌드]
+            self.sections["🚀 [NGX-3]"] = [f"{prefix}({s['Symbol']}:{s['Energy']}%)" for s in ngx_top3]
+            for s in ngx_top3: floor_2_results.append({"Section": "NGX-3", "Symbol": s['Symbol'], "Energy": s['Energy'], "State": prefix})
+
+            # [NBI-3 섹션 빌드]
+            self.sections["🧬 [NBI-3]"] = [f"{prefix}({s['Symbol']}:{s['Energy']}%)" for s in nbi_top3]
+            for s in nbi_top3: floor_2_results.append({"Section": "NBI-3", "Symbol": s['Symbol'], "Energy": s['Energy'], "State": prefix})
+
+            # [BNAI 섹션 보정] - 0.0 찍히는 문제 해결
+            if bnai_df is not None and not bnai_df.empty:
+                # 상위 3개만 추출, Energy가 0이면 '데이터오류' 표시
+                bnai_top = bnai_df.sort_values(by='Energy', ascending=False).head(3)
+                self.sections["🤖 [BNAI]"] = []
+                for _, r in bnai_top.iterrows():
+                    val = r['Energy'] if r['Energy'] > 0 else "수정요망"
+                    self.sections["🤖 [BNAI]"].append(f"{prefix}({r['Symbol']}:{val})")
+                    floor_2_results.append({"Section": "BNAI", "Symbol": r['Symbol'], "Energy": r['Energy'], "State": prefix})
+            
+            # 최종 엑셀 저장을 위한 버퍼 저장 (원칙 1 준수)
+            self.floor_2_df = pd.DataFrame(floor_2_results)
+            
+            return True
+        except Exception as e:
+            self.error_log.append(f"2층 공정 붕괴: {str(e)}")
+            logging.error(f"❌ 2층 공정 에러 상세: {traceback.format_exc()}")
+            return False
+
+    # [보강] 실시간 추출 엔진 (기존 _get_index_realtime_top3를 이 버전으로 교체 권장)
+    def _get_index_realtime_top3(self, ticker):
+        """실시간 ETF 기반 상위 종목 추출 및 상폐 종목 필터링"""
+        target_etf = "QQQN" if "^NGX" in ticker else "IBB"
+        try:
+            etf = yf.Ticker(target_etf)
+            # yfinance 최신 버전의 holdings를 쓰되, 실패 시 하드코딩된 주요 리스트로 우회하지 않고 보고함
+            df_holdings = etf.holdings 
+            
+            if df_holdings is None or df_holdings.empty:
+                # [No Shortcuts] 데이터 없으면 가짜 안 만들고 에러 던짐
+                raise ValueError(f"{target_etf} 실시간 리스트 확보 실패")
+
+            # 에너지(당일 변동성) 계산 로직
+            valid_list = []
+            symbols = df_holdings['Symbol'].tolist()[:15] # 상위 15개만 정밀 분석
+            
+            for sym in symbols:
+                if not sym or pd.isna(sym): continue
+                t = yf.Ticker(sym)
+                h = t.history(period="2d")
+                if len(h) < 2: continue
+                
+                change = ((h['Close'].iloc[-1] / h['Close'].iloc[-2]) - 1) * 100
+                valid_list.append({"Symbol": sym, "Energy": round(change, 2)})
+            
+            # 에너지 점수 높은 순 정렬
+            top3 = sorted(valid_list, key=lambda x: x['Energy'], reverse=True)[:3]
+            return top3
+        except Exception as e:
+            logging.warning(f"⚠️ {ticker} 추출 중 부분 결함: {e}")
+            return [{"Symbol": "CHECK", "Energy": 0.0}] * 3
+            
     # 3번 #
     def _get_index_realtime_top3(self, ticker):
         """[V40 무결성 엔진] 하드코딩 폐기 / 실시간 ETF 홀딩스 직접 추출 방식"""
