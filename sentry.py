@@ -394,75 +394,75 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_2(self):
         """
-        [V40 최종 수선] 사용자 제공 엑셀(NBI_260, NGX_100) 전용 가공 공정
-        수정 사항: API 전수조사 완전 제거, 엑셀 컬럼명(V40_Energy, Vol_Ratio_%) 정밀 매칭
+        [V40 최종 수선] 사용자 업로드 파일명 정밀 저격 공정
+        수정 사항: 'NGX_DATA' 대신 실제 파일명 'V40_NGX_100_COMPLETE (1).xlsx' 직접 호출
         """
-        logging.info("공정 2: 2층 전략주 발굴 (사용자 제공 엑셀 데이터 강제 타격)...")
+        logging.info("공정 2: 2층 전략주 발굴 (업로드 파일 정밀 타격 시작)...")
         try:
-            # 1. 사용자 제공 엑셀 리소스 로드 (파일 데이터 직접 사용)
-            ngx_df = self.load_resource("NGX_DATA")  # V40_NGX_100_COMPLETE (1).xlsx
-            nbi_df = self.load_resource("NBI_DATA")  # V40_NBI_260_COMPLETE (1).xlsx
-            bnai_df = self.load_resource("BNAI_DATA")
+            import pandas as pd
+            import os
+
+            # 1. 실제 업로드된 파일명으로 직접 로드 (경로 및 파일명 무결성 확보)
+            # 시스템 환경에 따라 파일명이 다를 수 있으므로 리소스 로더를 통해 강제 매칭
+            ngx_df = self.load_resource("V40_NGX_100_COMPLETE (1).xlsx")
+            nbi_df = self.load_resource("V40_NBI_260_COMPLETE (1).xlsx")
+            bnai_df = self.load_resource("V7_RESULT_BNAI_FINAL.xlsx")
+
+            # 파일 로드 실패 시 즉각 모순 보고 (원칙 3)
+            if ngx_df is None or nbi_df is None:
+                raise FileNotFoundError(f"실제 리소스 타격 실패: NGX({ngx_df is not None}), NBI({nbi_df is not None})")
 
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️보수" if is_collapse else "🚀공격"
             f2_data = []
 
-            # 2. NGX / NBI 데이터 가공 (사용자 엑셀 컬럼 기준)
+            # 2. 데이터 가공 (엑셀 실존 컬럼: V40_Energy, Vol_Ratio_%)
             for section, df in [("🚀 [NGX-3]", ngx_df), ("🧬 [NBI-3]", nbi_df)]:
                 self.sections[section] = []
-                if df is not None and not df.empty:
-                    # 엑셀 상단 3개 데이터 추출 (V40_Energy 기준 정렬된 상태 유지)
-                    df_top = df.head(3)
-                    for _, r in df_top.iterrows():
-                        # 사용자 엑셀 컬럼명 정밀 타격: Ticker, V40_Energy, Vol_Ratio_%
-                        sym = str(r.get('Ticker', 'N/A'))
-                        en = r.get('V40_Energy', 0.0)
-                        vol_ratio = r.get('Vol_Ratio_%', 0.0)
-                        price = r.get('Curr_Price', 0.0)
+                # 상위 3개 데이터 정밀 추출
+                df_top = df.head(3)
+                for _, r in df_top.iterrows():
+                    sym = str(r.get('Ticker', 'N/A'))
+                    en = r.get('V40_Energy', 0.0)
+                    vol = r.get('Vol_Ratio_%', 0.0)
+                    price = r.get('Curr_Price', 0.0)
 
-                        # 라벨 생성 시 'Short' 대신 엑셀에 있는 'Vol_Ratio_%' 사용
-                        label = f"{prefix}({sym}:E{en}/V{vol_ratio}%)"
-                        self.sections[section].append(label)
-                        
-                        f2_data.append({
-                            "Section": section, "Ticker": sym, "Energy": en,
-                            "Vol_Ratio": vol_ratio, "Curr_Price": price, "State": prefix
-                        })
+                    # 무결성 라벨 생성
+                    label = f"{prefix}({sym}:E{en}/V{vol}%)"
+                    self.sections[section].append(label)
+                    f2_data.append({
+                        "Section": section, "Ticker": sym, "Energy": en,
+                        "Vol_Ratio": vol, "Curr_Price": price, "State": prefix
+                    })
 
-            # 3. BNAI 데이터 처리 (V_Energy 기준)
+            # 3. BNAI 데이터 처리 (V_Energy 저격)
             if bnai_df is not None and not bnai_df.empty:
-                # V_Energy 또는 Energy 컬럼 자동 탐색
-                energy_col = next((c for c in bnai_df.columns if any(k in c for k in ['V_Energy', 'Energy'])), None)
-                symbol_col = next((c for c in bnai_df.columns if any(k in c for k in ['Ticker', 'Symbol', 'Date'])), bnai_df.columns[0])
+                energy_col = 'V_Energy' if 'V_Energy' in bnai_df.columns else 'Energy'
+                bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
+                
+                self.sections["🤖 [BNAI]"] = []
+                for _, r in bnai_top.iterrows():
+                    sym = "TGT" if 'Date' in bnai_df.columns else str(r.get('Ticker', 'BNAI'))
+                    en = float(r.get(energy_col, 0.0))
+                    self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
+                    f2_data.append({
+                        "Section": "BNAI", "Ticker": sym, "Energy": en, 
+                        "Vol_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
+                    })
 
-                if energy_col:
-                    bnai_df[energy_col] = pd.to_numeric(bnai_df[energy_col], errors='coerce').fillna(0)
-                    bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
-                    
-                    self.sections["🤖 [BNAI]"] = []
-                    for _, r in bnai_top.iterrows():
-                        sym = str(r[symbol_col]) if symbol_col != 'Date' else "TGT"
-                        en = float(r[energy_col])
-                        self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
-                        f2_data.append({
-                            "Section": "BNAI", "Ticker": sym, "Energy": en, 
-                            "Vol_Ratio": 0.0, "Curr_Price": 0.0, "State": prefix
-                        })
-
-            # 4. 무결성 검증 (Negative Check)
+            # 4. 최종 무결성 검증 (Negative Check)
             self.floor_2_df = pd.DataFrame(f2_data)
             if self.floor_2_df.empty:
-                raise ValueError("사용자 엑셀 로드 후 가공 데이터 0건 (리소스 연결 모순)")
+                raise ValueError("가공 결과 데이터가 존재하지 않음 (로직 모순)")
 
             return True
 
         except Exception as e:
-            # 원칙 3: 모순 발생 시 상세 에러 보고
-            err_msg = f"2층 엑셀 가공 공정 내부 모순: {str(e)}"
+            # 원칙 3: 모순 발생 시 수동 확인 요청
+            err_msg = f"2층 파일 타격 공정 모순: {str(e)}"
             self.error_log.append(err_msg)
             import traceback
-            logging.error(f"❌ 2층 상세 에러 위치: {traceback.format_exc()}")
+            logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
             return True
 
     # --------------------------------------------------------------------------
