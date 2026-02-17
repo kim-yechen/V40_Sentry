@@ -78,25 +78,45 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def load_resource(self, file_name):
         mapping = {
-            "BNAI_DATA": "V40_TEN_BAGGER_REPORT_0837.xlsx - Sheet1.csv",
-            "BEST_TARGETS": "V40_BEST_TARGETS.xlsx - Sheet1.csv",
-            "V8_REVISION_FINAL": "V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx - Sheet1.csv"
+            "BNAI_DATA": "V7_RESULT_BNAI_FINAL.xlsx",
+            "BEST_TARGETS": "V40_BEST_TARGETS.xlsx",
+            "V8_REVISION_FINAL": "V8_REVISION_FINAL.xlsx"
         }
-        
         target_path = mapping.get(file_name, file_name)
         
         if not os.path.exists(target_path):
-            files = [f for f in os.listdir('.') if file_name.split('_')[0] in f]
-            if files: target_path = files[0]
-            else:
-                logging.error(f"❌ [자료 실종] {file_name} 찾을 수 없음")
-                return None
+            logging.error(f"❌ [파일 실종] {target_path}")
+            return None
 
-        logging.info(f"📁 [파일 로드] {target_path} 연결 성공")
         try:
-            return pd.read_csv(target_path, encoding='utf-8-sig')
-        except:
+            # 확장자에 따라 읽기 방식 강제 지정
+            if target_path.endswith('.xlsx'):
+                return pd.read_excel(target_path)
+            else:
+                return pd.read_csv(target_path, encoding='utf-8-sig')
+        except Exception as e:
+            logging.warning(f"⚠️ {target_path} 로드 재시도 (cp949): {e}")
             return pd.read_csv(target_path, encoding='cp949')
+
+    # --------------------------------------------------------------------------
+    # [수선] 스크래핑 보조: 0개일 경우 '형님의 무결성 예비군' 즉시 투입
+    # --------------------------------------------------------------------------
+    def _get_index_realtime_top3(self, ticker):
+        is_ngx = "^NGX" in ticker
+        # ... (중략: 기존 스크래핑 로직) ...
+        
+        # [핵심] 만약 0개라면? 형님의 'Sentry 리스트'를 강제로 집어넣습니다.
+        if not targets or len(targets) == 0:
+            logging.warning(f"📡 {ticker} 스크래핑 타격 실패. 예비 명단 가동!")
+            if is_ngx:
+                # NGX(차세대 기술주) 예비군
+                targets = ["MSTR", "APP", "TTD", "NET", "DKNG", "HOOD", "MDB", "ZS"]
+            else:
+                # NBI(바이오 대장주) 예비군
+                targets = ["VRTX", "REGN", "AMGN", "GILD", "BIIB", "MRNA", "ILMN", "ALNY"]
+
+        # 이후 스코어링 및 상위 3개 추출 로직 수행...
+        # (기존 코드와 동일)
 
     # --------------------------------------------------------------------------
     # [핵심 로직] 바이오/비바이오 구분 필터링
