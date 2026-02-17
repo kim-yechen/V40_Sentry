@@ -218,18 +218,27 @@ class QuantumControlCenter:
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
     # --------------------------------------------------------------------------
-    # [V40 완성형] 공정 1: 매크로 파동 분석 및 상관계수 역산
+    # [V40 완성형] 공정 1: 3대 파동(V7/V8/V7C) 분석 및 상관계수 역산
     # --------------------------------------------------------------------------
     def process_macro(self):
-        logging.info("공정 1: V40 파동붕괴 분석 및 상관계수 역산 시작...")
+        logging.info("공정 1: V40 파동붕괴 분석(V7/V8/V7C) 및 상관계수 역산 시작...")
         try:
-            # 1. 기초 데이터 로드 (V8 REVISION)
+            # 1. 리소스 로드 (V8 REVISION 및 V7C 원자재)
             v8_data = self.load_resource("V8_REVISION_FINAL")
-            col = next((c for c in v8_data.columns if any(x in c for x in ['Cash', 'Ratio', 'V8'])), None)
-            if not col: raise KeyError("V8 현금 비중 컬럼 누락")
+            v7c_data = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT")
+            
+            if v8_data is None or v7c_data is None:
+                raise ValueError("기초 파동 데이터(V8/V7C) 로드 실패")
 
             # 2. 파동붕괴 수치 확정 (V8 우세 판정)
+            col = next((c for c in v8_data.columns if any(x in c for x in ['Cash', 'Ratio', 'V8'])), None)
             raw_v8 = v8_data[col].iloc[-1]
+            
+            # [원칙 2: Negative Check]
+            if not self.validate_data(raw_v8, "V8_RAW"): 
+                logging.error("❌ V8 수치 모순 발생 (데이터 오염)")
+                return False
+
             self.v8_p = raw_v8 * 100 if raw_v8 <= 1.0 else raw_v8
             
             # [V8 스위치] 강제 개입 로직
@@ -237,69 +246,70 @@ class QuantumControlCenter:
                 self.v8_p = max(self.v8_p, 60.0)
             self.v7_p = 100 - self.v8_p
 
-            # 3. [형님 제안] V7C(물리)-NGX(기술) 상관계수 역산
-            # 물리(원자재)와 디지털(신기술)의 에너지 전이를 추적합니다.
+            # 3. [형님 핵심 제안] V7C(물리)-NGX(기술) 상관계수 역산
+            # 물리적 에너지(원자재)와 디지털 에너지(신기술)의 전이를 추적합니다.
             try:
-                # NGX0(신기술)와 V7C(에너지)의 최근 60일 데이터
+                # NGX(신기술)와 V7C(에너지)의 최근 60일 데이터 싱크
                 ngx_price = yf.download("^NGX", period="60d", progress=False)['Close']
-                v7c_energy = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT")['V_Energy'].tail(60)
+                v7c_energy = v7c_data['V_Energy'].tail(60)
                 
-                # 데이터 길이 맞춤 후 상관계수 계산
+                # 데이터 결합 및 상관계수 역산 (Negative Check 포함)
                 combined = pd.concat([ngx_price, v7c_energy], axis=1).dropna()
+                if len(combined) < 10: raise ValueError("상관계수 표본 부족")
+                
                 self.correlation = combined.corr().iloc[0, 1]
                 
-                # 상관계수가 극단적 마이너스(-)면 파동 붕괴 가속화 (자본 이동)
+                # [붕괴 가속화] 상관계수가 극단적 마이너스(-)면 자본 이동 가속화로 판단
                 if self.correlation < -0.7:
-                    self.v8_p += abs(self.correlation) * 5 # V8 위험 가중치 상향
+                    self.v8_p += abs(self.correlation) * 5 
                     self.market_state = "🚨 [에너지 대전이] 원자재->신기술 자본 이동"
-            except:
+            except Exception as e:
                 self.correlation = 0.0
-                logging.warning("⚠️ 상관계수 역산 실패 (데이터 부족)")
+                logging.warning(f"⚠️ 상관계수 분석 스킵: {e}")
 
-            # 4. 최종 시장 상태 판정
+            # 4. 최종 시장 시나리오 판정
+            # V8이 60%를 넘는 순간이 바로 '파동 붕괴'의 지점입니다.
             if self.v8_p >= 60: 
-                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 가동 (생존 최우선)"
+                self.market_state = "🚨 [V8 붕괴] 위기 시나리오 (생존 라인 상향)"
             else:
-                self.market_state = "🔥 [V7 질서] 평시 시나리오 가동 (수익 극대화)"
+                self.market_state = "🔥 [V7 질서] 평시 시나리오 (수익 극대화)"
 
             self.fetch_market_indices()
             return True
+            
         except Exception as e:
             self.error_log.append(f"매크로 분석 결함: {str(e)}")
+            # [원칙 3] 지름길 금지: 에러 나면 형님께 즉시 보고
+            logging.error(f"⚠️ 파동붕괴함수 모순 발생: {e}")
             return False
 
     # --------------------------------------------------------------------------
     # [V40 완성형] 공정 2: 1층 보유주 점검 (V8 생존 라인 상향 적용)
     # --------------------------------------------------------------------------
     def process_floor_1(self):
-        logging.info(f"공정 2: 1층 진단 (파동 상태: {self.market_state})")
+        is_v8_dominant = self.v8_p >= 60.0
         portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU']
         results = []
-        
-        # [V8 붕괴 체크]
-        is_v8_dominant = self.v8_p >= 60.0
         
         try:
             raw = yf.download(portfolio, period='1y', group_by='ticker', progress=False)
             for sym in portfolio:
                 df = raw[sym].dropna()
-                if df.empty: continue
-                
                 price = df['Close'].iloc[-1]
                 ma120 = df['Close'].rolling(120).mean().iloc[-1]
                 gap = ((price / ma120) - 1) * 100
                 
                 # --- [V40 시나리오 연동 알고리즘] ---
-                # V8 붕괴 시에는 '진짜 대장주'만 남기고 다 쳐내는 생존 라인 가동
                 if is_v8_dominant:
-                    overheat_limit = 60.0  # 형님 제안: 익절 라인을 높여서 폭주하는 대장주 끝까지 먹기
-                    exit_margin = 1.05    # 120일선 위 5% 여유 있을 때 미리 탈출
+                    # 형님 로직: 위기 시엔 익절 라인을 60%로 높여서 대장주만 끝까지 홀딩
+                    overheat_limit = 60.0 
+                    exit_margin = 1.05 # 120일선 위 5%에서 선제 매도
                     
                     if price < ma120 * exit_margin: action, icon = "🔴 [위기매도]", "🚨"
                     elif gap > overheat_limit: action, icon = "🟡 [보수익절]", "💰"
                     else: action, icon = "🛡️ [방어홀딩]", "💎"
                 else:
-                    # V7 평시 시나리오
+                    # V7 평시 로직
                     if price < ma120: action, icon = "🔴 [전량매도]", "💀"
                     elif gap > 35.0: action, icon = "🟡 [과열분할]", "⚠️"
                     else: action, icon = "🟢 [강력홀딩]", "💎"
@@ -309,7 +319,7 @@ class QuantumControlCenter:
             self.floor_1_df = pd.DataFrame(results)
             return True
         except Exception as e:
-            logging.error(f"1층 공정 결함: {e}")
+            logging.error(f"1층 공정 결합 오류: {e}")
             return False
 
     # --------------------------------------------------------------------------
