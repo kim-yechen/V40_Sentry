@@ -253,7 +253,7 @@ class QuantumControlCenter:
         files = [f for f in os.listdir('.') if f.lower().endswith(('.csv', '.xlsx'))]
 
         # ---------------------------------------------------------
-        # SECTION 1: SHIELD (MINING 파일 기반) - 보정 완료
+        # SECTION 1: SHIELD (MINING 파일 기반) - 명칭 정정 완료
         # ---------------------------------------------------------
         try:
             m_df = None
@@ -263,35 +263,29 @@ class QuantumControlCenter:
                     break
             
             if m_df is not None:
-                # [무결성 강화] 컬럼명을 싹 다 대문자로 바꾸고 공백을 제거한 뒤 비교합니다.
-                # 형님 파일의 모든 컬럼을 전수조사해서 'V'와 'ENERGY'가 들어간 놈을 강제로 잡습니다.
-                target_col = None
-                for col in m_df.columns:
-                    clean_col = str(col).upper().replace(" ", "").strip()
-                    if "V_ENERGY" in clean_col or "VENERGY" in clean_col:
-                        target_col = col
-                        break
+                # [무결성 보정] 형님 파일에는 'V_Energy'가 아니라 'Energy'라고 되어 있습니다.
+                # 'Energy' 또는 'V_Energy' 중 있는 놈을 무조건 잡습니다.
+                target_col = next((c for c in m_df.columns if 'ENERGY' in str(c).upper()), None)
                 
                 if target_col:
-                    m_df['Clean_Score'] = pd.to_numeric(m_df[target_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                    
-                    # Grade 컬럼도 똑같은 방식으로 유연하게 찾기
-                    grade_col = next((c for c in m_df.columns if 'GRADE' in str(c).upper()), None)
-                    if grade_col:
-                        shield_df = m_df[m_df[grade_col].str.contains('Shield', case=False, na=False)]
-                        top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
+                    # 중복 컬럼일 경우 첫 번째 것만 선택 (Series 강제화)
+                    energy_data = m_df[target_col]
+                    if isinstance(energy_data, pd.DataFrame):
+                        energy_data = energy_data.iloc[:, 0]
                         
-                        res = []
-                        for _, r in top3.iterrows():
-                            # Symbol 컬럼도 유연하게 찾기
-                            sym_col = next((c for c in m_df.columns if 'SYMBOL' in str(c).upper()), m_df.columns[0])
-                            res.append(f"{r[sym_col]} | E:{r['Clean_Score']:,.1f}")
-                            all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r[sym_col], "Energy": r['Clean_Score']})
-                        self.sections["🛡️ [SHIELD]"] = res if res else ["❌ 조건맞는데이터없음"] * 3
+                    m_df['Clean_Score'] = pd.to_numeric(energy_data.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    
+                    # Grade 컬럼 필터링 (Shield 등급)
+                    shield_df = m_df[m_df['Grade'].str.contains('Shield', case=False, na=False)]
+                    top3 = shield_df.sort_values('Clean_Score', ascending=False).head(3)
+                    
+                    res = []
+                    for _, r in top3.iterrows():
+                        res.append(f"{r['Symbol']} | E:{r['Clean_Score']:,.1f}")
+                        all_targets.append({"Section": "🛡️ [SHIELD]", "Symbol": r['Symbol'], "Energy": r['Clean_Score']})
+                    self.sections["🛡️ [SHIELD]"] = res
                 else:
-                    # 컬럼을 정말 못 찾으면 파일의 모든 컬럼명을 형님께 보고 (원칙 3:Contradictory Check)
-                    actual_cols = ", ".join(m_df.columns.tolist())
-                    raise KeyError(f"형님, 파일에 'V_Energy'가 없습니다. 현재 컬럼들: [{actual_cols}]")
+                    raise KeyError(f"형님, 파일에 'Energy' 관련 컬럼이 아예 없습니다.")
                     
             else:
                 self.sections["🛡️ [SHIELD]"] = ["❌ MINING파일누락"] * 3
