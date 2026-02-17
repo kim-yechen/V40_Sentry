@@ -337,45 +337,57 @@ class QuantumControlCenter:
     # [3단계] 2층 전략주 발굴 (필터링 적용 완료)
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-        logging.info("공정 3: 2층 전략주 발굴 및 파동 붕괴 시나리오 적용...")
+        logging.info("공정 3: 2층 전략주 발굴 (지능형 컬럼 매칭 가동)...")
         try:
-            # 1. 실시간 지수 상위 3개 추출 (NGX-비바이오, NBI-바이오 필터 적용됨)
+            # 1. 실시간 데이터 확보 (실패 시 예비 명단 가동)
             ngx_top3 = self._get_index_realtime_top3("^NGX")
             nbi_top3 = self._get_index_realtime_top3("^NBI")
             
+            # 2. BNAI 데이터 로드 및 유연한 컬럼 매칭
             bnai_df = self.load_resource("BNAI_DATA")
             
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️대기" if is_collapse else "🚀승인"
-            
             floor_2_results = []
-            
-            # [NGX-3]
-            self.sections["🚀 [NGX-3]"] = [f"{prefix}({s['Symbol']}:{s['Energy']}%)" for s in ngx_top3]
-            for s in ngx_top3: floor_2_results.append({"Section": "NGX-3", "Symbol": s['Symbol'], "Energy": s['Energy'], "State": prefix})
 
-            # [NBI-3]
-            self.sections["🧬 [NBI-3]"] = [f"{prefix}({s['Symbol']}:{s['Energy']}%)" for s in nbi_top3]
-            for s in nbi_top3: floor_2_results.append({"Section": "NBI-3", "Symbol": s['Symbol'], "Energy": s['Energy'], "State": prefix})
+            # [NGX-3/NBI-3 처리] 빈 값 방지 로직
+            for section, top3 in [("🚀 [NGX-3]", ngx_top3), ("🧬 [NBI-3]", nbi_top3)]:
+                self.sections[section] = []
+                for s in top3:
+                    sym = s.get('Symbol', 'N/A')
+                    en = s.get('Energy', 0.0)
+                    self.sections[section].append(f"{prefix}({sym}:{en}%)")
+                    floor_2_results.append({"Section": section, "Symbol": sym, "Energy": en, "State": prefix})
 
-            # [BNAI]
+            # [BNAI 처리] 형님 엑셀의 'V_Energy'를 찾아내는 정밀 로직
             if bnai_df is not None and not bnai_df.empty:
-                bnai_top = bnai_df.sort_values(by='Energy', ascending=False).head(3) if 'Energy' in bnai_df.columns else bnai_df.head(3)
-                self.sections["🤖 [BNAI]"] = []
-                for _, r in bnai_top.iterrows():
-                    # 컬럼명 유연성 확보
-                    sym = r.get('Symbol', r.get('Ticker', 'UNKNOWN'))
-                    en = r.get('Energy', r.get('Q_Score', 0))
+                # 'Energy'가 들어간 모든 컬럼명을 찾음 (V_Energy, Energy_Inertia 등 중 가장 적합한 것)
+                energy_col = next((c for c in bnai_df.columns if 'V_Energy' in c or 'Energy' == c or 'Q_Score' in c), None)
+                symbol_col = next((c for c in bnai_df.columns if 'Symbol' in c or 'Ticker' in c or 'Date' == c), bnai_df.columns[0])
+
+                if energy_col:
+                    # 데이터 타입 강제 변환 후 정렬
+                    bnai_df[energy_col] = pd.to_numeric(bnai_df[energy_col], errors='coerce').fillna(0)
+                    bnai_top = bnai_df.sort_values(by=energy_col, ascending=False).head(3)
                     
-                    self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
-                    floor_2_results.append({"Section": "BNAI", "Symbol": sym, "Energy": en, "State": prefix})
-            
+                    self.sections["🤖 [BNAI]"] = []
+                    for _, r in bnai_top.iterrows():
+                        sym = str(r[symbol_col]) if symbol_col != 'Date' else "TGT" # Date만 있으면 TGT로 표시
+                        en = float(r[energy_col])
+                        self.sections["🤖 [BNAI]"].append(f"{prefix}({sym}:{en:.1f})")
+                        floor_2_results.append({"Section": "BNAI", "Symbol": sym, "Energy": en, "State": prefix})
+                else:
+                    self.error_log.append("⚠️ BNAI 에너지 컬럼 식별 불가: 수동 확인 요망")
+
             self.floor_2_df = pd.DataFrame(floor_2_results)
-            return True
+            return True # 어떤 모순이 있어도 리포트 완성을 위해 True 반환
+
         except Exception as e:
-            self.error_log.append(f"2층 공정 붕괴: {str(e)}")
-            logging.error(f"❌ 2층 공정 에러 상세: {traceback.format_exc()}")
-            return False
+            # [원칙 3] 에러 내용을 삭제하지 않고 상세 보고
+            err_msg = f"2층 공정 내부 모순 발생: {str(e)}"
+            self.error_log.append(err_msg)
+            logging.error(f"❌ 2층 상세 에러: {traceback.format_exc()}")
+            return True # 시스템 중단 방지
 
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
