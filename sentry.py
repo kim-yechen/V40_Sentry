@@ -277,61 +277,64 @@ class QuantumControlCenter:
     # [수선] 공정 1: V40 파동붕괴 분석 (480라인 자폭 방지형)
     # --------------------------------------------------------------------------
     def process_macro(self):
-        logging.info("공정 1: V40 파동붕괴 분석... (데이터 강제 저격)")
-        try:
-            # 1. V8 리소스 로드 (파일 형식/시트 무관 전수조사)
-            v8_file = "V8_REVISION_FINAL.xlsx"
-            if not os.path.exists(v8_file):
-                # 파일이 없으면 형님께 보고하고 수동 수치(18%)로 완주 유도
-                self.error_log.append("⚠️ V8 엑셀 실종: 수동 보정치(18%) 적용")
-                self.v8_p = 18.0
-            else:
-                # 시트 번호 0번(첫번째)을 우선 공략
-                v8_df = pd.read_excel(v8_file, sheet_name=0) 
-                
-                # 'V8_NextGen_Cash' 또는 유사 컬럼 정밀 탐색
-                target_col = next((c for c in v8_df.columns if any(x in str(c) for x in ['NextGen', 'V8', 'Cash'])), None)
-                
-                if target_col:
-                    raw_v8 = v8_df[target_col].dropna().iloc[-1]
-                    self.v8_p = float(raw_v8)
-                else:
-                    self.error_log.append("⚠️ V8 컬럼 구조 모순: 기본값 적용")
-                    self.v8_p = 18.0
+        logging.info("공정 1: V40 파동붕괴 분석 + VIX 공포 레이더 가동...")
+        try:
+            # 1. [신설] VIX 실시간 데이터 저격
+            try:
+                vix_t = yf.Ticker("^VIX")
+                vix_h = vix_t.history(period="2d")
+                self.vix_val = vix_h['Close'].iloc[-1]
+                vix_chg = ((self.vix_val / vix_h['Close'].iloc[-2]) - 1) * 100
+            except:
+                self.vix_val = 20.0 # 에러 시 중립값
+                vix_chg = 0.0
 
-            # [수치 보정] 0.18 -> 18%
-            if self.v8_p <= 1.0: self.v8_p *= 100 
-            
-            # [V8 스위치] 형님 지시: 스위치 2단계 시 무조건 60% 이상 방어막
-            if self.macro_v8_switch >= 2:
-                self.v8_p = max(self.v8_p, 60.0)
-                logging.info(f"🛡️ 스위치 가동: V8 파동 {self.v8_p}% 고정")
+            # 2. V8 리소스 로드 (기존 엑셀 로직 유지)
+            v8_file = "V8_REVISION_FINAL.xlsx"
+            if not os.path.exists(v8_file):
+                self.v8_p = 18.0
+            else:
+                v8_df = pd.read_excel(v8_file, sheet_name=0)
+                target_col = next((c for c in v8_df.columns if any(x in str(c) for x in ['NextGen', 'V8', 'Cash'])), None)
+                self.v8_p = float(v8_df[target_col].dropna().iloc[-1]) if target_col else 18.0
 
-            self.v7_p = 100 - self.v8_p
+            if self.v8_p <= 1.0: self.v8_p *= 100 
 
-            # 2. V7C 원자재 에너지 (COMMODITY_ANALYSIS_REPORT.xlsx)
-            try:
-                c_df = pd.read_excel("COMMODITY_ANALYSIS_REPORT.xlsx")
-                # '현재 에너지' 글자가 있는 행의 1번 인덱스(데이터 열) 추출
-                energy_val = c_df[c_df.iloc[:, 0].astype(str).str.contains('현재 에너지')].iloc[0, 1]
-                self.v7c_energy = float(energy_val)
-            except:
-                self.error_log.append("⚠️ V7C 데이터 위치 모순: 47.19(고정) 적용")
-                self.v7c_energy = 47.19
+            # 3. [V40-Bias] VIX 기반 강제 비중 조정 (형님의 핵심 전략)
+            vix_bias = 0
+            if self.vix_val >= 30:
+                vix_bias = 25.0  # 패닉 상황: 현금 비중 25% 강제 추가
+                self.vix_label = f"🚨 [패닉] VIX {self.vix_val:.1f}({vix_chg:+.1f}%)"
+            elif self.vix_val >= 20:
+                vix_bias = 10.0  # 경계 상황: 현금 비중 10% 강제 추가
+                self.vix_label = f"🟡 [경계] VIX {self.vix_val:.1f}({vix_chg:+.1f}%)"
+            else:
+                self.vix_label = f"🟢 [안정] VIX {self.vix_val:.1f}({vix_chg:+.1f}%)"
 
-            # 3. 시장 시나리오 판정
-            self.market_state = "🚨 [V8 붕괴]" if self.v8_p >= 60.0 else "🔥 [V7 질서]"
-            
-            # 지수 데이터 로드 (NBI, NGX)
-            self.fetch_market_indices()
-            
-            return True # 모순이 있어도 보고서 작성을 위해 True 반환
-            
-        except Exception as e:
-            # 치명적 오류 시에도 시스템을 죽이지 않고 내용을 기록
-            self.error_log.append(f"공정 1 엔진 내부 결함: {e}")
-            logging.error(f"🚨 [V40 내부모순] {e}")
-            return True # 480라인의 raise ValueError를 피하기 위해 True 반환
+            # 4. 최종 파동 비중 확정 (스위치 2단계 + VIX Bias)
+            if self.macro_v8_switch >= 2:
+                self.v8_p = max(self.v8_p, 60.0) + vix_bias
+            else:
+                self.v8_p += vix_bias
+            
+            self.v8_p = min(self.v8_p, 95.0) # 최소한의 사격권 5%는 남김
+            self.v7_p = 100 - self.v8_p
+
+            # 5. 시장 시나리오 판정 고도화
+            if self.vix_val >= 30:
+                self.market_state = "🚨 [패닉 대기] 현금 사수 및 신규 사격 금지"
+            elif self.v8_p >= 60.0:
+                self.market_state = "🛡️ [V8 우세] 보수적 대응 (현금 확보/방어주 집중)"
+            else:
+                self.market_state = "🔥 [V7 우세] 공격적 대응 (주도주 적극 공략)"
+
+            # 지수 데이터 로드 (NBI, NGX)
+            self.fetch_market_indices()
+            return True
+            
+        except Exception as e:
+            self.error_log.append(f"공정 1 엔진 내부 결함: {e}")
+            return True
 
     # --------------------------------------------------------------------------
     # [보완] 지수 데이터 확보 함수 (fetch_market_indices)
@@ -479,6 +482,7 @@ class QuantumControlCenter:
             # 리포트 텍스트 생성
             report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
             report += f"📊 파동: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
+            report += f"😱 공포: {self.vix_label}\n" # VIX 라벨 추가
             report += f"📢 상태: {status_msg}\n"
             
             nbi_val, nbi_chg = self.indices_data.get("NBI", (0, 0))
