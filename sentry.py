@@ -674,14 +674,20 @@ def critical_sos(self, msg):
 
     # --------------------------------------------------------------------------
     # [메인 실행]
-    # --------------------------------------------------------------------------
-        def run(self):
+    def run(self):
+        """[V40 메인 공정] 1+1-1=Complete 원칙 준수"""
         try:
             logging.info("=== V40 무결성 시스템 가동 ===")
-            if not self.process_macro(): raise ValueError("매크로 분석 단계 모순 발생")
-            if not self.process_floor_1(): raise ValueError("1층 진단 단계 모순 발생")
-            if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순 발생")
             
+            # 단계별 공정 검증 (No Shortcuts)
+            if not self.process_macro(): 
+                raise ValueError("매크로 분석 단계 모순 발생")
+            if not self.process_floor_1(): 
+                raise ValueError("1층 진단 단계 모순 발생")
+            if not self.process_floor_2(): 
+                raise ValueError("2층 발굴 단계 모순 발생")
+            
+            # 최종 보고 공정
             f_name = self.finalize_and_report()
             if f_name:
                 self.dispatch(f_name)
@@ -690,8 +696,8 @@ def critical_sos(self, msg):
             logging.info(f"=== 전 공정 정상 완료 ({end - self.start_time:.1f}초) ===")
             
         except Exception as e:
+            # 에러 발생 시 즉시 SOS (Negative Check)
             self.critical_sos(str(e))
-
 if __name__ == "__main__":
     # 형님, 스위치 2단계 가동합니다.
     v40 = QuantumControlCenter(macro_v8_switch=2)
