@@ -536,15 +536,15 @@ class QuantumControlCenter:
         try:
             logging.info("=== V40 무결성 관제 시스템 가동 ===")
             
+            # 1. 매크로 분석
             if not self.process_macro():
                 raise ValueError("공정 1(매크로) 모순 발생")
             
-            if not self.process_floor_1():
-                raise ValueError("공정 2(1층 진단) 모순 발생")
-                
+            # 2. 2층 전략주 발굴 (1층은 2층 공정 내부에 통합됨)
             if not self.process_floor_2():
                 raise ValueError("공정 3(2층 발굴) 모순 발생")
             
+            # 3. 리포트 생성 및 전송 (1+1-1=Complete 원칙)
             f_name = self.finalize_and_report()
             if f_name:
                 self.dispatch(f_name)
@@ -552,8 +552,10 @@ class QuantumControlCenter:
             logging.info(f"=== 전 공정 정상 완료 ({time.time() - self.start_time:.1f}초) ===")
             
         except Exception as e:
+            # [No Shortcuts] 에러 발생 시 즉시 보고
             self.critical_sos(str(e))
 
 if __name__ == "__main__":
+    # 스위치 2단계 가동
     v40 = QuantumControlCenter(macro_v8_switch=2)
     v40.run()
