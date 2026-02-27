@@ -147,7 +147,7 @@ def load_resource(self, file_name):
     # --------------------------------------------------------------------------
     # [최종 교체본] 실시간 전수조사 엔진 (지름길 금지 / 어제 종가 기준)
     # --------------------------------------------------------------------------
-    def _get_index_realtime_top3(self, ticker):
+def _get_index_realtime_top3(self, ticker):
         """[V40 정공법] 카운트 제한 폐기 / 전수 스캔 / 필터링 적용"""
         from bs4 import BeautifulSoup
         
