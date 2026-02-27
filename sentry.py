@@ -636,7 +636,7 @@ def save_to_excel(self, filename):
         except Exception as e:
             logging.error(f"엑셀 저장 중 붕괴: {e}")
 
-    def dispatch(self, filename):
+def dispatch(self, filename):
         """[V40 전송 관제] 토요일 로직 통합"""
         try:
             kst = datetime.utcnow() + timedelta(hours=9)
