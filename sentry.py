@@ -30,32 +30,35 @@ logging.basicConfig(
 )
 
 class QuantumControlCenter:
-    
-# --------------------------------------------------------------------------
-    # [수선 1] 무결성 리소스 로더 (파일명 버전 자동 감지)
-    # --------------------------------------------------------------------------
-    def load_resource(self, pattern):
-        """파일명에 패턴(예: NGX, NBI, BNAI)이 포함된 가장 최근 파일을 찾아 로드"""
-        import glob
-        try:
-            # [무결성] (1)이 붙든 날짜가 붙든 패턴으로 최신 파일 검색
-            files = glob.glob(f"*{pattern}*.*")
-            if not files:
-                logging.error(f"❌ [파일 실종] {pattern} 패턴의 파일을 찾을 수 없습니다.")
-                return None
-            
-            # 수정 시간이 가장 최근인 놈이 진짜다
-            target_path = max(files, key=os.path.getmtime)
-            logging.info(f"📂 [리소스 확보] {target_path} 로드 중...")
+    def __init__(self, macro_v8_switch=2): # 형님이 넣으신 switch 인자를 받을 수 있게 입구 확장
+        self.start_time = time.time()
+        self.macro_v8_switch = macro_v8_switch 
+        self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
+        self.chat_id = "198757117"
+        
+        # [이 틀] 형님이 강조하신 내부 상태 지표 (절대 삭제 금지)
+        self.v7_p = 50.0 
+        self.v8_p = 50.0 
+        self.market_state = "⚖️ 초기화 중"
+        self.analysis_report = ""
+        self.indices_data = {"NBI": (0, 0), "NGX": (0, 0)}
+        
+        # [이 틀] 원칙 1을 위한 데이터 버퍼 (100% 유지)
+        self.floor_1_df = pd.DataFrame()
+        self.floor_2_df = pd.DataFrame()
+        self.error_log = []
+        
+        # [이 틀] 섹션별 무결성 저장소 (이게 있어야 텔레그램 보고서가 나옴)
+        self.sections = {
+            "🛡️ [SHIELD]": [],
+            "🎯 [BEST]": [],
+            "🚀 [NGX-3]": [],
+            "🧬 [NBI-3]": [],
+            "🤖 [BNAI]": []
+        }
+        logging.info(f"V40 엔진 점화 (스위치 {self.macro_v8_switch} 적용)")
 
-            if target_path.endswith('.xlsx'):
-                return pd.read_excel(target_path)
-            else:
-                return pd.read_csv(target_path, encoding='utf-8-sig')
-        except Exception as e:
-            self.error_log.append(f"리소스 로드 모순 ({pattern}): {e}")
-            return None
-
+    # 이후 형님의 원래 코드(300줄)를 그대로 이어 붙이세요.
     # --------------------------------------------------------------------------
     # [수선 2] 하이브리드 탑3 스캐너 (중복 제거 및 3중 방어망)
     # --------------------------------------------------------------------------
