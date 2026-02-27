@@ -89,7 +89,7 @@ class QuantumControlCenter:
         pass
         
     """시총 3억불 + 영업이익 플러스 확인 (Insider Monkey 스타일)"""
-   def _apply_profit_filter(self, symbol):
+def _apply_profit_filter(self, symbol):
         """[V40 분석] 시총 3억불 기준 우량주 필터링"""
         try:
             t = yf.Ticker(symbol)
