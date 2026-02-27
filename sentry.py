@@ -24,9 +24,9 @@ warnings.filterwarnings('ignore')
 # 로깅 시스템 구축 (추적 무결성 확보)
 # --------------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler()]
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler()]
 )
 
 class QuantumControlCenter:
