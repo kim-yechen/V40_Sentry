@@ -102,7 +102,7 @@ def _apply_profit_filter(self, symbol):
         except:
             return "❓" # 에러 시 불명 처리
             
-    def _is_bio_sector(self, symbol):
+def _is_bio_sector(self, symbol):
         try:
             t = yf.Ticker(symbol)
             sector = t.info.get('sector', '')
