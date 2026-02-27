@@ -565,7 +565,7 @@ def process_floor_2(self):
         logging.info("공정 4: 파동 시나리오 확정 및 리포트 빌드 가동...")
         
         try:
-            # 1. 상태 판정 (Negative Check 포함)
+            # 1. 상태 판정 (V8 파동 기준)
             is_crisis = self.v8_p >= 60.0
             
             if is_crisis:
@@ -582,7 +582,7 @@ def process_floor_2(self):
             # ------------------------------------------------------------------
             self.save_to_excel(filename)
             
-            # 3. 텔레그램 리포트 텍스트 생성
+            # 3. 텔레그램 리포트 텍스트 생성 (날라갔던 내용 전량 복원)
             report = f"📅 [V40 통합 관제 보고]\n"
             report += f"시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
             
@@ -609,7 +609,7 @@ def process_floor_2(self):
                 if stocks:
                     report += f"- {sector}: {', '.join(stocks)}\n"
             
-            report += f"\n💾 시스템 로그: {filename} 저장 완료"
+            report += f"\n\n💾 시스템 로그: {filename} 저장 완료"
             self.analysis_report = report
             
             return filename
@@ -619,20 +619,17 @@ def process_floor_2(self):
             return None
 
     def save_to_excel(self, filename):
-        """[V40 파일링] 엑셀 저장 및 스타일링 공정"""
+        """[V40 파일링] 엑셀 저장 및 스타일링 공정 (원칙 1 준수)"""
         try:
             from openpyxl.styles import Font, PatternFill, Alignment
             
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                # 1층 데이터 시트
                 if not self.floor_1_df.empty:
                     self.floor_1_df.to_excel(writer, sheet_name='1st_Floor_Asset', index=False)
                 
-                # 2층 데이터 시트
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2nd_Floor_Target', index=False)
                 
-                # 스타일링 적용 (시인성 확보)
                 for sheetname in writer.sheets:
                     ws = writer.sheets[sheetname]
                     for cell in ws[1]:
@@ -640,7 +637,6 @@ def process_floor_2(self):
                         cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center")
                     
-                    # 열 너비 자동 조절
                     for col in ws.columns:
                         max_length = 0
                         column = col[0].column_letter
@@ -681,7 +677,7 @@ def process_floor_2(self):
             logging.error(f"전송 공정 무결성 붕괴: {str(e)}")
 
     def critical_sos(self, msg):
-        """시스템 비상 알림"""
+        """시스템 비상 알림 (텔레그램 전송)"""
         try:
             import traceback
             base_url = f"https://api.telegram.org/bot{self.t_token}"
@@ -695,7 +691,6 @@ def process_floor_2(self):
         try:
             logging.info("=== V40 무결성 관제 시스템 가동 ===")
             
-            # 공정별 순차 실행 및 검증
             if not self.process_macro():
                 raise ValueError("공정 1(매크로) 모순 발생")
             
@@ -705,17 +700,15 @@ def process_floor_2(self):
             if not self.process_floor_2():
                 raise ValueError("공정 3(2층 발굴) 모순 발생")
             
-            # 마무리 및 전송
             f_name = self.finalize_and_report()
             if f_name:
                 self.dispatch(f_name)
             
-            logging.info(f"=== 전 공정 정상 완료 (소요시간: {time.time() - self.start_time:.1f}초) ===")
+            logging.info(f"=== 전 공정 정상 완료 ({time.time() - self.start_time:.1f}초) ===")
             
         except Exception as e:
             self.critical_sos(str(e))
 
 if __name__ == "__main__":
-    # 시스템 인스턴스 생성 및 실행
     v40 = QuantumControlCenter(macro_v8_switch=2)
     v40.run()
