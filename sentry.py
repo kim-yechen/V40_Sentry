@@ -75,16 +75,19 @@ class QuantumControlCenter:
             return False
 
     def _check_vix_shield(self):
-    """VIX 25 돌파 시 강제 방어 모드 전환"""
-    try:
-        vix = yf.Ticker("^VIX").history(period="1d")['Close'].iloc[-1]
-        if vix >= 25:
-            self.v8_p = max(self.v8_p, 80.0) # VIX 폭주 시 현금 비중 80% 강제 고정
-            self.market_state = "🚨 [VIX 폭주] 초긴급 방어"
-    except:
+        """VIX 25 돌파 시 강제 방어 모드 전환"""
+        try:
+            vix = yf.Ticker("^VIX").history(period="1d")['Close'].iloc[-1]
+            if vix >= 25:
+                self.v8_p = max(self.v8_p, 80.0) # VIX 폭주 시 현금 비중 80% 강제 고정
+                self.market_state = "🚨 [VIX 폭주] 초긴급 방어"
+        except:
+            pass
+
+    def _apply_profit_filter(self, symbol):
+        """여기에 다음 로직을 이어서 작성하시면 됩니다"""
         pass
         
-    def _apply_profit_filter(self, symbol):
     """시총 3억불 + 영업이익 플러스 확인 (Insider Monkey 스타일)"""
     try:
         t = yf.Ticker(symbol)
