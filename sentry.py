@@ -405,7 +405,6 @@ def process_floor_2(self):
 
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
-    # 원칙: 분석 logic + 데이터 처리 + 엑셀 저장까지 완료 후 리포트 발송
     # --------------------------------------------------------------------------
     def finalize_and_report(self):
         """[공정 4] 최종 시나리오 확정 및 엑셀/텔레그램 통합 보고"""
@@ -415,11 +414,10 @@ def process_floor_2(self):
             kst = datetime.utcnow() + timedelta(hours=9)
             filename = f"V40_MASTER_REPORT_{kst.strftime('%m%d_%H%M')}.xlsx"
 
-            # 2. [원칙 1] 보고 전 엑셀 저장 (스타일링 포함)
-            # 파일이 저장되지 않으면 리포트를 발행하지 않습니다.
+            # [원칙 준수] 엑셀 저장 선행 (스타일링 포함)
             self.save_to_excel(filename)
 
-            # 3. 리포트 텍스트 빌드 (날라갔던 지수 및 섹터 정보 전량 복원)
+            # 2. 리포트 텍스트 빌드
             status_msg = "🚨 [V8 우세] 보수" if self.v8_p >= 60.0 else "🔥 [V7 우세] 공격"
             nbi = self.indices_data.get("NBI", (0, 0))
             ngx = self.indices_data.get("NGX", (0, 0))
@@ -432,14 +430,15 @@ def process_floor_2(self):
             report += "🏢 [1층 보유자산 점검]\n"
             if not self.floor_1_df.empty:
                 for _, r in self.floor_1_df.iterrows():
-                    report += f"{r['Icon']} {r['Symbol']}: {r['Action']} (Gap: {r['Gap']}%)\n"
-            else: report += "데이터 없음\n"
+                    report += f"{r.get('Icon', '🔹')} {r.get('Symbol', 'N/A')}: {r.get('Action', 'HOLD')} (Gap: {r.get('Gap', 0)}%)\n"
+            else:
+                report += "데이터 없음\n"
 
             report += "\n🧬 [2층 12개 섹터별 무결성 타겟]\n"
             for sector, stocks in self.sections.items():
-                if stocks: report += f"- {sector}: {', '.join(stocks)}\n"
+                if stocks:
+                    report += f"- {sector}: {', '.join(stocks)}\n"
 
-            # [원칙 2 & 3] 에러 로그가 있다면 숨기지 않고 리포트 하단에 강제 보고
             if self.error_log:
                 report += f"\n⚠️ [공정 모순 로그]\n" + "\n".join(self.error_log[-3:])
 
@@ -448,9 +447,9 @@ def process_floor_2(self):
             return filename
 
         except Exception as e:
-            self.critical_sos(f"리포트 생성 단계 치명적 오류: {e}")
+            logging.error(f"리포트 생성 단계 치명적 오류: {e}")
             return None
-
+            
     def save_to_excel(self, filename):
         """[V40 파일링] 엑셀 저장 및 스타일링 공정 (가시성 복원)"""
         try:
