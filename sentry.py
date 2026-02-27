@@ -114,6 +114,7 @@ def _is_bio_sector(self, symbol):
     # [방어 로직] 무결성 리소스 로더
     # --------------------------------------------------------------------------
     def load_resource(self, file_name):
+        """[V40 자원 로드] 엑셀 데이터 매핑 및 존재 확인"""
         mapping = {
             "BNAI_DATA": "V7_RESULT_BNAI_FINAL.xlsx",
             "BEST_TARGETS": "V40_BEST_TARGETS.xlsx",
@@ -123,6 +124,14 @@ def _is_bio_sector(self, symbol):
         
         if not os.path.exists(target_path):
             logging.error(f"❌ [파일 실종] {target_path}")
+            return None
+        
+        # 1+1-1=Complete 원칙에 따라 데이터 로드 후 검증 로직 연결
+        try:
+            df = pd.read_excel(target_path)
+            return df
+        except Exception as e:
+            logging.error(f"❌ [파일 파손] {e}")
             return None
 
         try:
