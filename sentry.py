@@ -560,7 +560,7 @@ def process_floor_2(self):
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
-def finalize_and_report(self):
+    def finalize_and_report(self):
         logging.info("공정 4: 파동 시나리오 확정 및 리포트 빌드...")
         try:
             is_crisis = self.v8_p >= 60.0
@@ -575,7 +575,7 @@ def finalize_and_report(self):
             # [원칙 1] 엑셀 저장
             self.save_to_excel(filename)
             
-            # 리포트 텍스트 생성
+            # 리포트 텍스트 생성 (날라갔던 50줄 복원)
             report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
             report += f"📊 파동: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
             report += f"📢 상태: {status_msg}\n"
@@ -603,25 +603,23 @@ def finalize_and_report(self):
             self.critical_sos(f"리포트 빌드 치명적 에러: {str(e)}")
             return None
 
-def save_to_excel(self, filename):
+    def save_to_excel(self, filename):
         """엑셀 저장 공정 (스타일링 복원 완료)"""
         try:
+            from openpyxl.styles import Font, PatternFill, Alignment
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
                 if not self.floor_1_df.empty:
                     self.floor_1_df.to_excel(writer, sheet_name='1st_Floor_Asset', index=False)
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2nd_Floor_Target', index=False)
                 
-                # 시각적 가독성 스타일링
                 for sheetname in writer.sheets:
                     ws = writer.sheets[sheetname]
-                    # 헤더 스타일
                     for cell in ws[1]:
                         cell.font = Font(bold=True, color="FFFFFF")
                         cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center")
                     
-                    # 컬럼 너비 자동 조정
                     for col in ws.columns:
                         max_length = 0
                         column = col[0].column_letter
@@ -631,22 +629,20 @@ def save_to_excel(self, filename):
                                     max_length = len(str(cell.value))
                             except: pass
                         ws.column_dimensions[column].width = (max_length + 2) * 1.2
-                        
             logging.info(f"✅ {filename} 생성 완료")
         except Exception as e:
             logging.error(f"엑셀 저장 중 붕괴: {e}")
 
-def dispatch(self, filename):
+    def dispatch(self, filename):
         """[V40 전송 관제] 토요일 로직 통합"""
         try:
             kst = datetime.utcnow() + timedelta(hours=9)
             is_saturday = (kst.weekday() == 5)
-            
             base_url = f"https://api.telegram.org/bot{self.t_token}"
             
             # 1. 텍스트 리포트 전송
             requests.post(f"{base_url}/sendMessage", data={
-                "chat_id": self.chat_id, 
+                "chat_id": self.chat_id, 
                 "text": self.analysis_report
             })
             
@@ -654,16 +650,15 @@ def dispatch(self, filename):
             if is_saturday:
                 logging.info(f"📅 토요일 무결성 엑셀 전송 가동: {filename}")
                 with open(filename, 'rb') as f:
-                    requests.post(f"{base_url}/sendDocument", 
-                                  data={"chat_id": self.chat_id}, 
+                    requests.post(f"{base_url}/sendDocument", 
+                                  data={"chat_id": self.chat_id}, 
                                   files={'document': f})
             else:
                 logging.info("📅 평일 공정: 엑셀 전송 생략 (토요일 원칙 준수)")
-                
         except Exception as e:
             logging.error(f"전송 단계 무결성 붕괴: {e}")
 
-def critical_sos(self, msg):
+    def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
         try:
             import traceback
@@ -673,31 +668,13 @@ def critical_sos(self, msg):
         except:
             pass
 
-    def process_macro(self): 
-        return True
-
-    def process_floor_1(self): 
-        return True
-
-    def process_floor_2(self): 
-        return True
-
-    def finalize_and_report(self): 
-        return None
-
-    def dispatch(self, f_name): 
-        pass
-
     def run(self):
         """[V40 메인 공정] 1+1-1=Complete 원칙 준수"""
         try:
             logging.info("=== V40 무결성 시스템 가동 ===")
-            if not self.process_macro(): 
-                raise ValueError("매크로 분석 단계 모순 발생")
-            if not self.process_floor_1(): 
-                raise ValueError("1층 진단 단계 모순 발생")
-            if not self.process_floor_2(): 
-                raise ValueError("2층 발굴 단계 모순 발생")
+            if not self.process_macro(): raise ValueError("매크로 분석 단계 모순 발생")
+            if not self.process_floor_1(): raise ValueError("1층 진단 단계 모순 발생")
+            if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순 발생")
             
             f_name = self.finalize_and_report()
             if f_name:
@@ -709,6 +686,5 @@ def critical_sos(self, msg):
             self.critical_sos(str(e))
 
 if __name__ == "__main__":
-    # 이 줄은 벽에 딱 붙어야 합니다 (공백 0개)
     v40 = QuantumControlCenter(macro_v8_switch=2)
     v40.run()
