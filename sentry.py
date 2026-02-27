@@ -666,6 +666,7 @@ def dispatch(self, filename):
     def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
         try:
+            import traceback
             base_url = f"https://api.telegram.org/bot{self.t_token}"
             error_msg = f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"
             requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": error_msg})
