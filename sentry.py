@@ -113,7 +113,7 @@ def _is_bio_sector(self, symbol):
     # --------------------------------------------------------------------------
     # [방어 로직] 무결성 리소스 로더
     # --------------------------------------------------------------------------
-    def load_resource(self, file_name):
+def load_resource(self, file_name):
         """[V40 자원 로드] 엑셀 데이터 매핑 및 존재 확인"""
         mapping = {
             "BNAI_DATA": "V7_RESULT_BNAI_FINAL.xlsx",
