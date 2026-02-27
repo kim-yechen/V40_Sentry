@@ -89,17 +89,19 @@ class QuantumControlCenter:
         pass
         
     """시총 3억불 + 영업이익 플러스 확인 (Insider Monkey 스타일)"""
-    try:
-        t = yf.Ticker(symbol)
-        info = t.info
-        mkt_cap = info.get('marketCap', 0)
-        # 영업이익 확인 (간소화)
-        if mkt_cap > 300_000_000:
-            return "💎" # 우량
-        return "⚠️" # 미달
-    except:
-        return "❓"
-        
+   def _apply_profit_filter(self, symbol):
+        """[V40 분석] 시총 3억불 기준 우량주 필터링"""
+        try:
+            t = yf.Ticker(symbol)
+            info = t.info
+            mkt_cap = info.get('marketCap', 0)
+            # Negative Check: 데이터 상식 확인 (시총이 0 이하일 순 없음)
+            if mkt_cap > 300_000_000:
+                return "💎" # 우량
+            return "⚠️" # 미달
+        except:
+            return "❓" # 에러 시 불명 처리
+            
     def _is_bio_sector(self, symbol):
         try:
             t = yf.Ticker(symbol)
