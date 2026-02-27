@@ -564,10 +564,7 @@ def process_floor_2(self):
         logging.info("공정 4: 파동 시나리오 확정 및 리포트 빌드...")
         try:
             is_crisis = self.v8_p >= 60.0
-            if is_crisis:
-                status_msg = "🚨 [V8 우세] 보수적 대응 (현금 확보/방어주 집중)"
-            else:
-                status_msg = "🔥 [V7 우세] 공격적 대응 (주도주 적극 공략)"
+            status_msg = "🚨 [V8 우세] 보수적 대응 (현금 확보/방어주 집중)" if is_crisis else "🔥 [V7 우세] 공격적 대응 (주도주 적극 공략)"
 
             kst = datetime.utcnow() + timedelta(hours=9)
             filename = f"V40_MASTER_REPORT_{kst.strftime('%m%d_%H%M')}.xlsx"
@@ -575,7 +572,7 @@ def process_floor_2(self):
             # [원칙 1] 엑셀 저장
             self.save_to_excel(filename)
             
-            # 리포트 텍스트 생성 (날라갔던 50줄 복원)
+            # 리포트 텍스트 복원
             report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
             report += f"📊 파동: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
             report += f"📢 상태: {status_msg}\n"
@@ -634,27 +631,15 @@ def process_floor_2(self):
             logging.error(f"엑셀 저장 중 붕괴: {e}")
 
     def dispatch(self, filename):
-        """[V40 전송 관제] 토요일 로직 통합"""
+        """[V40 전송 관제]"""
         try:
             kst = datetime.utcnow() + timedelta(hours=9)
-            is_saturday = (kst.weekday() == 5)
             base_url = f"https://api.telegram.org/bot{self.t_token}"
+            requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": self.analysis_report})
             
-            # 1. 텍스트 리포트 전송
-            requests.post(f"{base_url}/sendMessage", data={
-                "chat_id": self.chat_id, 
-                "text": self.analysis_report
-            })
-            
-            # 2. 엑셀 파일 전송 (토요일 한정)
-            if is_saturday:
-                logging.info(f"📅 토요일 무결성 엑셀 전송 가동: {filename}")
+            if kst.weekday() == 5:
                 with open(filename, 'rb') as f:
-                    requests.post(f"{base_url}/sendDocument", 
-                                  data={"chat_id": self.chat_id}, 
-                                  files={'document': f})
-            else:
-                logging.info("📅 평일 공정: 엑셀 전송 생략 (토요일 원칙 준수)")
+                    requests.post(f"{base_url}/sendDocument", data={"chat_id": self.chat_id}, files={'document': f})
         except Exception as e:
             logging.error(f"전송 단계 무결성 붕괴: {e}")
 
@@ -665,8 +650,7 @@ def process_floor_2(self):
             base_url = f"https://api.telegram.org/bot{self.t_token}"
             error_msg = f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"
             requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": error_msg})
-        except:
-            pass
+        except: pass
 
     def run(self):
         """[V40 메인 공정] 1+1-1=Complete 원칙 준수"""
@@ -677,11 +661,9 @@ def process_floor_2(self):
             if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순 발생")
             
             f_name = self.finalize_and_report()
-            if f_name:
-                self.dispatch(f_name)
+            if f_name: self.dispatch(f_name)
             
-            end = time.time()
-            logging.info(f"=== 전 공정 정상 완료 ({end - self.start_time:.1f}초) ===")
+            logging.info(f"=== 전 공정 정상 완료 ({time.time() - self.start_time:.1f}초) ===")
         except Exception as e:
             self.critical_sos(str(e))
 
