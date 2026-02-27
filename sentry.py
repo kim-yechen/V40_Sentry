@@ -603,7 +603,7 @@ def finalize_and_report(self):
             self.critical_sos(f"리포트 빌드 치명적 에러: {str(e)}")
             return None
 
-    def save_to_excel(self, filename):
+def save_to_excel(self, filename):
         """엑셀 저장 공정 (스타일링 복원 완료)"""
         try:
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
