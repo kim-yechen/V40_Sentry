@@ -661,7 +661,8 @@ def dispatch(self, filename):
                 logging.info("📅 평일 공정: 엑셀 전송 생략 (토요일 원칙 준수)")
                 
         except Exception as e:
-            logging.error(f"전송 단계 무결성 붕괴: {e}")def critical_sos(self, msg):
+            logging.error(f"전송 단계 무결성 붕괴: {e}")
+def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
         try:
             base_url = f"https://api.telegram.org/bot{self.t_token}"
