@@ -559,102 +559,163 @@ def process_floor_2(self):
 
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
+    # 원칙: 분석 logic + 데이터 처리 + 엑셀 저장까지 완료 후 리포트 발송
     # --------------------------------------------------------------------------
     def finalize_and_report(self):
-        logging.info("공정 4: 파동 시나리오 확정 및 리포트 빌드...")
+        logging.info("공정 4: 파동 시나리오 확정 및 리포트 빌드 가동...")
+        
         try:
+            # 1. 상태 판정 (Negative Check 포함)
             is_crisis = self.v8_p >= 60.0
-            status_msg = "🚨 [V8 우세] 보수적 대응" if is_crisis else "🔥 [V7 우세] 공격적 대응"
+            
+            if is_crisis:
+                status_msg = "🚨 [V8 우세] 보수적 대응 (현금 확보 및 방어주 집중)"
+            else:
+                status_msg = "🔥 [V7 우세] 공격적 대응 (주도주 및 탄력주 공략)"
 
+            # 2. 파일명 생성 (KST 기준)
             kst = datetime.utcnow() + timedelta(hours=9)
             filename = f"V40_MASTER_REPORT_{kst.strftime('%m%d_%H%M')}.xlsx"
             
-            # [원칙 1] 엑셀 저장 (무조건 보고보다 먼저)
+            # ------------------------------------------------------------------
+            # [원칙 준수] 1+1-1=Complete: 리포트 보고 전 엑셀 저장 필수
+            # ------------------------------------------------------------------
             self.save_to_excel(filename)
             
-            # 리포트 빌드
-            report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
-            report += f"📊 파동: V7({self.v7_p:.1f}%) | V8({self.v8_p:.1f}%)\n"
-            report += f"📢 상태: {status_msg}\n"
+            # 3. 텔레그램 리포트 텍스트 생성
+            report = f"📅 [V40 통합 관제 보고]\n"
+            report += f"시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
             
+            report += f"📊 시스템 파동 에너지\n"
+            report += f"- V7 파동(공격): {self.v7_p:.1f}%\n"
+            report += f"- V8 파동(방어): {self.v8_p:.1f}%\n"
+            report += f"📢 현재 관제 상태: {status_msg}\n\n"
+            
+            # 주요 지수 데이터 복원
             nbi_val, nbi_chg = self.indices_data.get("NBI", (0, 0))
             ngx_val, ngx_chg = self.indices_data.get("NGX", (0, 0))
-            report += f"🧬 NBI: {nbi_val:,.1f}({nbi_chg:+.1f}%)\n"
-            report += f"🚀 NGX: {ngx_val:,.1f}({ngx_chg:+.1f}%)\n\n"
+            report += f"🧬 NBI 바이오 지수: {nbi_val:,.1f} ({nbi_chg:+.1f}%)\n"
+            report += f"🚀 NGX 반도체 지수: {ngx_val:,.1f} ({ngx_chg:+.1f}%)\n\n"
             
-            report += "🏢 [1층 보유주 점검]\n"
+            report += "🏢 [1층 보유자산 무결성 점검]\n"
             if not self.floor_1_df.empty:
-                for _, r in self.floor_1_df.iterrows():
-                    report += f"{r['Icon']} {r['Symbol']}: {r['Action']} (Gap:{r['Gap']}%)\n"
+                for index, row in self.floor_1_df.iterrows():
+                    report += f"{row['Icon']} {row['Symbol']}: {row['Action']} (Gap: {row['Gap']}%)\n"
+            else:
+                report += "데이터 없음\n"
             
-            report += "\n🧬 [2층 12개 무결성 타겟]"
-            for sec, stocks in self.sections.items():
+            report += "\n🧬 [2층 12개 섹터별 무결성 타겟]\n"
+            for sector, stocks in self.sections.items():
                 if stocks:
-                    report += f"\n{sec}: {', '.join(stocks)}"
+                    report += f"- {sector}: {', '.join(stocks)}\n"
             
-            report += f"\n\n💾 저장완료: {filename}"
+            report += f"\n💾 시스템 로그: {filename} 저장 완료"
             self.analysis_report = report
+            
             return filename
+            
         except Exception as e:
-            self.critical_sos(f"리포트 빌드 에러: {str(e)}")
+            self.critical_sos(f"리포트 생성 단계 치명적 오류: {str(e)}")
             return None
 
     def save_to_excel(self, filename):
+        """[V40 파일링] 엑셀 저장 및 스타일링 공정"""
         try:
             from openpyxl.styles import Font, PatternFill, Alignment
+            
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                # 1층 데이터 시트
                 if not self.floor_1_df.empty:
                     self.floor_1_df.to_excel(writer, sheet_name='1st_Floor_Asset', index=False)
+                
+                # 2층 데이터 시트
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2nd_Floor_Target', index=False)
+                
+                # 스타일링 적용 (시인성 확보)
                 for sheetname in writer.sheets:
                     ws = writer.sheets[sheetname]
                     for cell in ws[1]:
                         cell.font = Font(bold=True, color="FFFFFF")
                         cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center")
+                    
+                    # 열 너비 자동 조절
                     for col in ws.columns:
                         max_length = 0
                         column = col[0].column_letter
                         for cell in col:
-                            if cell.value and len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
                         ws.column_dimensions[column].width = (max_length + 2) * 1.2
-            logging.info(f"✅ {filename} 생성 완료")
+            
+            logging.info(f"✅ 무결성 파일 생성 성공: {filename}")
+            
         except Exception as e:
-            logging.error(f"엑셀 저장 중 붕괴: {e}")
+            logging.error(f"엑셀 저장 공정 붕괴: {str(e)}")
 
     def dispatch(self, filename):
+        """[V40 전송] 텔레그램 발송 및 토요일 파일 업로드"""
         try:
             kst = datetime.utcnow() + timedelta(hours=9)
             base_url = f"https://api.telegram.org/bot{self.t_token}"
-            requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": self.analysis_report})
+            
+            # 1. 텍스트 보고서 발송
+            requests.post(f"{base_url}/sendMessage", data={
+                "chat_id": self.chat_id,
+                "text": self.analysis_report
+            })
+            
+            # 2. 토요일인 경우 엑셀 파일 추가 발송
             if kst.weekday() == 5:
+                logging.info("📅 토요일 정기 보고: 엑셀 파일 전송 가동")
                 with open(filename, 'rb') as f:
-                    requests.post(f"{base_url}/sendDocument", data={"chat_id": self.chat_id}, files={'document': f})
+                    requests.post(f"{base_url}/sendDocument", 
+                                  data={"chat_id": self.chat_id}, 
+                                  files={'document': f})
+                                  
         except Exception as e:
-            logging.error(f"전송 붕괴: {e}")
+            logging.error(f"전송 공정 무결성 붕괴: {str(e)}")
 
     def critical_sos(self, msg):
+        """시스템 비상 알림"""
         try:
             import traceback
             base_url = f"https://api.telegram.org/bot{self.t_token}"
-            error_msg = f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"
+            error_msg = f"🚨 [V40 시스템 긴급 중단]\n메시지: {msg}\n\n{traceback.format_exc()[-250:]}"
             requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": error_msg})
-        except: pass
+        except:
+            pass
 
     def run(self):
+        """V40 무결성 프로세스 메인 루프"""
         try:
-            logging.info("=== V40 무결성 시스템 가동 ===")
-            if not self.process_macro(): raise ValueError("매크로 분석 단계 모순")
-            if not self.process_floor_1(): raise ValueError("1층 진단 단계 모순")
-            if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순")
+            logging.info("=== V40 무결성 관제 시스템 가동 ===")
+            
+            # 공정별 순차 실행 및 검증
+            if not self.process_macro():
+                raise ValueError("공정 1(매크로) 모순 발생")
+            
+            if not self.process_floor_1():
+                raise ValueError("공정 2(1층 진단) 모순 발생")
+                
+            if not self.process_floor_2():
+                raise ValueError("공정 3(2층 발굴) 모순 발생")
+            
+            # 마무리 및 전송
             f_name = self.finalize_and_report()
-            if f_name: self.dispatch(f_name)
-            logging.info(f"=== 전 공정 정상 완료 ({time.time() - self.start_time:.1f}초) ===")
+            if f_name:
+                self.dispatch(f_name)
+            
+            logging.info(f"=== 전 공정 정상 완료 (소요시간: {time.time() - self.start_time:.1f}초) ===")
+            
         except Exception as e:
             self.critical_sos(str(e))
 
 if __name__ == "__main__":
+    # 시스템 인스턴스 생성 및 실행
     v40 = QuantumControlCenter(macro_v8_switch=2)
     v40.run()
