@@ -410,27 +410,34 @@ def process_floor_2(self):
         """[공정 4] 최종 시나리오 확정 및 엑셀/텔레그램 통합 보고"""
         logging.info("공정 4 가동: 파동 시나리오 확정 및 무결성 체크")
         try:
-            # 1. 시각 설정 (KST)
+            # 1. 시각 설정 (KST 기준)
             kst = datetime.utcnow() + timedelta(hours=9)
             filename = f"V40_MASTER_REPORT_{kst.strftime('%m%d_%H%M')}.xlsx"
 
-            # [원칙 준수] 엑셀 저장 선행 (스타일링 포함)
+            # [원칙 1] 1+1-1=Complete: 리포트 보고 전 엑셀 저장 및 스타일링 완료 필수
             self.save_to_excel(filename)
 
-            # 2. 리포트 텍스트 빌드
-            status_msg = "🚨 [V8 우세] 보수" if self.v8_p >= 60.0 else "🔥 [V7 우세] 공격"
+            # 2. 리포트 텍스트 빌드 (데이터 가공)
+            status_msg = "🚨 [V8 우세] 보수적 대응" if self.v8_p >= 60.0 else "🔥 [V7 우세] 공격적 대응"
             nbi = self.indices_data.get("NBI", (0, 0))
             ngx = self.indices_data.get("NGX", (0, 0))
 
-            report = f"📅 [V40 통합 관제 보고]\n시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
-            report += f"📊 시스템 파동 에너지\n- V7(공격): {self.v7_p:.1f}% / V8(방어): {self.v8_p:.1f}%\n"
+            report = f"📅 [V40 통합 관제 보고]\n"
+            report += f"시각: {kst.strftime('%Y-%m-%d %H:%M')}\n\n"
+            report += f"📊 시스템 파동 에너지\n"
+            report += f"- V7(공격): {self.v7_p:.1f}% / V8(방어): {self.v8_p:.1f}%\n"
             report += f"📢 현재 관제 상태: {status_msg}\n\n"
             report += f"🧬 NBI: {nbi[0]:,.1f}({nbi[1]:+.1f}%) / 🚀 NGX: {ngx[0]:,.1f}({ngx[1]:+.1f}%)\n\n"
 
             report += "🏢 [1층 보유자산 점검]\n"
             if not self.floor_1_df.empty:
                 for _, r in self.floor_1_df.iterrows():
-                    report += f"{r.get('Icon', '🔹')} {r.get('Symbol', 'N/A')}: {r.get('Action', 'HOLD')} (Gap: {r.get('Gap', 0)}%)\n"
+                    # 안전한 get 방식 채택 (No Shortcuts)
+                    icon = r.get('Icon', '🔹')
+                    sym = r.get('Symbol', 'N/A')
+                    act = r.get('Action', 'HOLD')
+                    gap = r.get('Gap', 0)
+                    report += f"{icon} {sym}: {act} (Gap: {gap}%)\n"
             else:
                 report += "데이터 없음\n"
 
@@ -439,6 +446,7 @@ def process_floor_2(self):
                 if stocks:
                     report += f"- {sector}: {', '.join(stocks)}\n"
 
+            # [원칙 2] Negative Check 결과 반영 (에러 로그 노출)
             if self.error_log:
                 report += f"\n⚠️ [공정 모순 로그]\n" + "\n".join(self.error_log[-3:])
 
@@ -449,44 +457,44 @@ def process_floor_2(self):
         except Exception as e:
             logging.error(f"리포트 생성 단계 치명적 오류: {e}")
             return None
-            
+
     def save_to_excel(self, filename):
-        """[V40 파일링] 엑셀 저장 및 스타일링 공정 (가시성 복원)"""
+        """[V40 파일링] 엑셀 저장 및 스타일링 (가시성 복원)"""
         try:
             from openpyxl.styles import Font, PatternFill, Alignment
             
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                # 1. 데이터 기록
+                # 1. 데이터 시트 기록
                 if not self.floor_1_df.empty:
                     self.floor_1_df.to_excel(writer, sheet_name='1st_Floor_Asset', index=False)
                 if not self.floor_2_df.empty:
                     self.floor_2_df.to_excel(writer, sheet_name='2nd_Floor_Target', index=False)
                 
-                # 2. [가시성 복원] 스타일링 공정
+                # 2. 스타일링 루프 (가시성 최적화)
                 for sheetname in writer.sheets:
                     ws = writer.sheets[sheetname]
-                    # 헤더 디자인: 남색 배경 + 흰색 볼드체
+                    # 헤더 스타일링
                     for cell in ws[1]:
                         cell.font = Font(bold=True, color="FFFFFF")
                         cell.fill = PatternFill(start_color="203764", end_color="203764", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center")
                     
-                    # 열 너비 자동 최적화 로직
+                    # 열 너비 자동 최적화
                     for col in ws.columns:
                         max_length = 0
                         column_letter = col[0].column_letter
                         for cell in col:
                             try:
                                 if cell.value:
-                                    val_len = len(str(cell.value))
-                                    if val_len > max_length: max_length = val_len
+                                    v_len = len(str(cell.value))
+                                    if v_len > max_length: max_length = v_len
                             except: pass
                         ws.column_dimensions[column_letter].width = (max_length + 2) * 1.2
             
             logging.info(f"✅ 무결성 파일 생성 성공: {filename}")
             
         except Exception as e:
-            # 스타일링 도중 터져도 파일은 남겨야 하므로 에러만 기록
+            # 스타일링 실패가 파일 저장 자체를 막지 않도록 예외 격리
             self.error_log.append(f"❌ 엑셀 스타일링 공정 결함: {e}")
             logging.error(f"엑셀 저장 중 예외 발생: {e}")
 
