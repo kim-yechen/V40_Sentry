@@ -31,9 +31,9 @@ logging.basicConfig(
 
 class QuantumControlCenter:
     def __init__(self, macro_v8_switch=2):
-        """
-        [시스템 초기화 공정]
-        """
+        """
+        [시스템 초기화 공정]
+        """
         self.start_time = time.time()
         self.macro_v8_switch = macro_v8_switch 
         self.t_token = "8425305405:AAEq04uN0CrBvEJUaW_e4olnpjSYlCQVLd0"
