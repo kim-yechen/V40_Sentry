@@ -51,6 +51,7 @@ class QuantumControlCenter:
         }
         logging.info(f"V40 엔진 점화 (스위치: {self.macro_v8_switch})")
 
+    # 73번 라인 부근: load_resource 끝나는 지점부터 다시 정렬합니다.
     def load_resource(self, file_name):
         """[V40 원칙] 파일 실종 시 가짜 데이터를 만들지 않고 로깅 후 보고"""
         mapping = {
@@ -70,95 +71,71 @@ class QuantumControlCenter:
             return pd.read_excel(path) if path.endswith('.xlsx') else pd.read_csv(path, encoding='utf-8-sig')
         except:
             return pd.read_csv(path, encoding='cp949')
-            
+
     # --------------------------------------------------------------------------
-    # [최종 교체본] 실시간 전수조사 엔진 (지름길 금지 / 어제 종가 기준)
+    # [수선] 여기서부터 들여쓰기가 반드시 한 칸(스페이스 4칸) 들어가야 합니다!
     # --------------------------------------------------------------------------
-def _get_index_realtime_top3(self, ticker):
-        """[V40 정공법] 카운트 제한 폐기 / 전수 스캔 / 필터링 적용"""
+    def _is_bio_sector(self, symbol):
+        """[V40 필터] 섹터 무결성 검사"""
+        try:
+            t = yf.Ticker(symbol)
+            sector = t.info.get('sector', '')
+            return "Healthcare" in sector or "Biotechnology" in sector
+        except:
+            return False
+
+    def _get_index_realtime_top3(self, ticker):
+        """[V40 정공법] 전수 스캔 및 에너지 필터링"""
         from bs4 import BeautifulSoup
         
         is_ngx = "^NGX" in ticker
         target_etf = "QQQN" if is_ngx else "IBB"
-        
-        # URL 설정
-        if is_ngx:
-            url = "https://www.slickcharts.com/nasdaq-next-gen-100"
-        else:
-            url = "https://www.zacks.com/funds/etf/IBB/holding"
+        url = "https://www.slickcharts.com/nasdaq-next-gen-100" if is_ngx else "https://www.zacks.com/funds/etf/IBB/holding"
 
-        logging.info(f"📡 [실시간 전수조사] {target_etf} 소스 타격 및 필터링 시작...")
-        
+        logging.info(f"📡 [실시간 전수조사] {target_etf} 필터링 시작...")
         targets = []
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
 
         try:
             res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # 티커 추출 로직
             if "slickcharts" in url:
                 items = soup.select('table.table-sm td > a[href^="/symbol/"]')
                 for item in items:
                     sym = item.text.strip()
-                    if sym and sym.isalpha(): targets.append(sym)
-            else: # zacks or fallback
-                # 야후 파이낸스 ETF 홀딩스 보조망
-                etf = yf.Ticker(target_etf)
-                try:
-                    # 상위 50개만 가져오더라도 핵심은 잡힘
-                    holdings = etf.get_holdings() 
-                    # dict or df return handling requires inspection, simplified to API top holdings if scraping fails
-                    # 여기서는 안전하게 예비 명단 사용 (스크래핑 실패 대비)
-                    if not targets: 
-                         # NGX 예비군 (기술주 위주)
-                        if is_ngx: targets = ["MSTR", "APP", "TTD", "NET", "DKNG", "HOOD", "MDB", "ZS"]
-                        # NBI 예비군 (바이오 위주)
-                        else: targets = ["VRTX", "REGN", "AMGN", "GILD", "BIIB", "MRNA", "ILMN", "ALNY"]
-                except: pass
+                    if sym.isalpha(): targets.append(sym)
+            
+            if not targets:
+                targets = ["MSTR", "APP", "TTD", "NET"] if is_ngx else ["VRTX", "REGN", "AMGN"]
 
-            logging.info(f"✅ {target_etf} 후보군 {len(targets)}개 확보. 전수 스캔 및 필터링...")
-
-            # [내부 함수] 에너지 계산 및 섹터 필터링
             def verify_and_score(sym):
                 try:
-                    # 1. 섹터 필터링 (NGX는 바이오 제외, NBI는 바이오만)
-                    # 시간이 걸리더라도 원칙 준수
                     is_bio = self._is_bio_sector(sym)
+                    if is_ngx and is_bio: return None
+                    if not is_ngx and not is_bio: return None
                     
-                    if is_ngx and is_bio: return None # NGX인데 바이오면 탈락
-                    if not is_ngx and not is_bio: return None # NBI인데 바이오 아니면 탈락
-                    
-                    # 2. 에너지 측정
                     t = yf.Ticker(sym)
                     h = t.history(period="2d", interval="1d", timeout=2.0)
                     if not h.empty and len(h) >= 2:
                         prev = h['Close'].iloc[-2]
                         last = h['Close'].iloc[-1]
-                        if last <= 0: return None
-                        energy = ((last / prev) - 1) * 100
-                        return {"Symbol": sym, "Energy": round(energy, 2)}
+                        return {"Symbol": sym, "Energy": round(((last / prev) - 1) * 100, 2)}
                 except: return None
                 return None
 
-            # 병렬 처리 (속도 향상)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
                 results = list(executor.map(verify_and_score, targets))
 
             valid_results = [r for r in results if r is not None]
             top3 = sorted(valid_results, key=lambda x: x['Energy'], reverse=True)[:3]
-            
-            while len(top3) < 3:
-                top3.append({"Symbol": "WAITING", "Energy": 0.0})
-
+            while len(top3) < 3: top3.append({"Symbol": "WAITING", "Energy": 0.0})
             return top3
-
         except Exception as e:
-            logging.error(f"⚠️ {ticker} 엔진 가동 중단: {str(e)}")
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
+    def process_macro(self):
+        # ... 이하 동일 (역시 들여쓰기 한 칸 밀어넣기)
     def process_macro(self):
         logging.info("공정 1: 매크로 파동 분석 및 VIX 실시간 검진 시작")
         try:
