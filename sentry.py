@@ -663,7 +663,7 @@ def dispatch(self, filename):
         except Exception as e:
             logging.error(f"전송 단계 무결성 붕괴: {e}")
 
-    def critical_sos(self, msg):
+def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
         try:
             base_url = f"https://api.telegram.org/bot{self.t_token}"
