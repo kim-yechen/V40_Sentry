@@ -662,28 +662,42 @@ def dispatch(self, filename):
                 
         except Exception as e:
             logging.error(f"전송 단계 무결성 붕괴: {e}")
+
 def critical_sos(self, msg):
         """비상벨: 텔레그램 긴급 발송"""
         try:
+            import traceback
             base_url = f"https://api.telegram.org/bot{self.t_token}"
             error_msg = f"🚨 [V40 긴급 중단]\n{msg}\n\n{traceback.format_exc()[-200:]}"
             requests.post(f"{base_url}/sendMessage", data={"chat_id": self.chat_id, "text": error_msg})
         except:
             pass
 
-    def process_macro(self): return True
-    def process_floor_1(self): return True
-    def process_floor_2(self): return True
-    def finalize_and_report(self): return None
-    def dispatch(self, f_name): pass
+    def process_macro(self): 
+        return True
+
+    def process_floor_1(self): 
+        return True
+
+    def process_floor_2(self): 
+        return True
+
+    def finalize_and_report(self): 
+        return None
+
+    def dispatch(self, f_name): 
+        pass
 
     def run(self):
         """[V40 메인 공정] 1+1-1=Complete 원칙 준수"""
         try:
             logging.info("=== V40 무결성 시스템 가동 ===")
-            if not self.process_macro(): raise ValueError("매크로 분석 단계 모순 발생")
-            if not self.process_floor_1(): raise ValueError("1층 진단 단계 모순 발생")
-            if not self.process_floor_2(): raise ValueError("2층 발굴 단계 모순 발생")
+            if not self.process_macro(): 
+                raise ValueError("매크로 분석 단계 모순 발생")
+            if not self.process_floor_1(): 
+                raise ValueError("1층 진단 단계 모순 발생")
+            if not self.process_floor_2(): 
+                raise ValueError("2층 발굴 단계 모순 발생")
             
             f_name = self.finalize_and_report()
             if f_name:
@@ -695,5 +709,6 @@ def critical_sos(self, msg):
             self.critical_sos(str(e))
 
 if __name__ == "__main__":
+    # 이 줄은 벽에 딱 붙어야 합니다 (공백 0개)
     v40 = QuantumControlCenter(macro_v8_switch=2)
     v40.run()
