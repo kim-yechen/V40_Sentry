@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 
 class QuantumControlCenter:
-    def __init__(self, macro_v8_switch=2):
+    def __init__(self, macro_v8_switch=2):
         """
         [시스템 초기화 공정]
         """
