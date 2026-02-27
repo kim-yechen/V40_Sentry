@@ -135,8 +135,6 @@ class QuantumControlCenter:
             return [{"Symbol": "ERROR", "Energy": 0.0}] * 3
 
     def process_macro(self):
-        # ... 이하 동일 (역시 들여쓰기 한 칸 밀어넣기)
-    def process_macro(self):
         logging.info("공정 1: 매크로 파동 분석 및 VIX 실시간 검진 시작")
         try:
             # 1. VIX 실시간 체크 (방어막 우선순위)
