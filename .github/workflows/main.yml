@@ -23,4 +23,5 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python sentry.py
+        run: |
+        python3 -c "import sys; content = open('sentry.py').read().replace('\xa0', ' '); exec(content)"
