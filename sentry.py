@@ -426,7 +426,7 @@ def process_floor_2(self):
     # --------------------------------------------------------------------------
     # [보완] 지수 데이터 확보 함수 (fetch_market_indices)
     # --------------------------------------------------------------------------
-    def fetch_market_indices(self):
+def fetch_market_indices(self):
         try:
             # 형님, 야후 파이낸스에서 지수 직접 긁어옵니다.
             indices = {"NBI": "^NBI", "NGX": "^NGX"}
