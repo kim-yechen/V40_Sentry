@@ -358,7 +358,7 @@ class QuantumControlCenter:
     # --------------------------------------------------------------------------
     def process_floor_1(self):
         is_v8_dominant = self.v8_p >= 60.0
-        portfolio = ['FCX', 'SCCO', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'MU', 'SIDU','RDW','TGB']
+        portfolio = ['FCX', 'SCCO','TGB', 'SIVR', 'ISSC', 'LUNR', 'IREN', 'TDW', 'SLB', 'SIDU','RDW']
         results = []
         
         try:
