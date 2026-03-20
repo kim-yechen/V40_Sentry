@@ -447,33 +447,30 @@ class QuantumControlCenter:
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
 
-            # [섹션 3] 🚀 TEN-B BNAI (날짜/외계어 완전 퇴출본)
+            # [섹션 3] 🚀 TEN-B BNAI (엑셀 컬럼명 'Symbol', 'Q_Score' 정밀 타격)
             self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
-                # 에너지 상위 3개 추출
-                bnai_top = bnai_df.sort_values(by='V_Energy', ascending=False).head(3)
+                # 1. 엑셀 구조에 맞게 정렬 (Q_Score가 높은 순서대로)
+                # 현재 파일 기준 상위 3개: BNAI, HYMC, ROLR
+                bnai_top = bnai_df.sort_values(by='Q_Score', ascending=False).head(3)
                 
                 for _, r in bnai_top.iterrows():
-                    # --- [무결성 정밀 사격] ---
-                    # 1순위: 'Symbol' 컬럼, 2순위: 'Ticker' 컬럼, 3순위: 맨 앞칸
-                    sym_candidate = r.get('Symbol', r.get('Ticker', r.iloc))
+                    # 2. 데이터 추출 (컬럼명 'Symbol'과 'Q_Score' 직접 지정)
+                    sym = str(r['Symbol'])
+                    score_val = float(r['Q_Score'])
                     
-                    # 만약 가져온 게 날짜 형태라면, 'Symbol'이라는 글자가 들어간 컬럼을 강제로 찾음
-                    if "00:00:00" in str(sym_candidate):
-                        # 컬럼명 중에 'Sym'이나 'Tick'이 포함된 컬럼을 뒤져서 가져옴
-                        true_col = [c for c in bnai_df.columns if any(x in str(c).upper() for x in ['SYM', 'TICK'])]
-                        sym = str(r[true_col]) if true_col else "CHECK_FILE"
-                    else:
-                        sym = str(sym_candidate)
+                    # 3. 에너지 가독성 처리 (형님 스타일 유지)
+                    # 만약 스코어가 백만 단위가 넘어가면 M으로 표시, 아니면 소수점 1자리
+                    display_score = f"{score_val/1000000:.1f}M" if score_val > 1000000 else f"{score_val:.1f}"
                     
-                    en_val = r.get('V_Energy', 0.0)
-                    display_en = f"{en_val/1000000:.1f}M" if en_val > 1000000 else f"{en_val:.1f}"
-                    
-                    label = f"🚀 {sym} | E:{display_en}"
+                    # [최종 라벨] 이제 외계어 대신 종목명이 찍힙니다.
+                    label = f"🚀 {sym} | E:{display_score}"
                     self.sections["🚀 [TEN-B]"].append(label)
-                    f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": en_val})
+                    
+                    # 4. 데이터 프레임 기록 (무결성 유지)
+                    f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": score_val})
 
-            # [섹션 4] 💎 [MINING-P] (Grade 세척 완료)
+            # [섹션 4] 💎 [MINING-P] (동일하게 수정)
             self.sections["💎 [MINING-P]"] = []
             if mining_df is not None and not mining_df.empty:
                 mining_pullback = mining_df[
@@ -482,7 +479,7 @@ class QuantumControlCenter:
                 ].sort_values(by='V_Energy', ascending=False).head(3)
 
                 for _, r in mining_pullback.iterrows():
-                    m_sym = r.get('Symbol', r.get('Ticker', r.iloc))
+                    m_sym = str(r.get('Symbol', r.get('Ticker', 'N/A')))
                     m_en = r.get('V_Energy', 0.0)
                     
                     # Grade 정밀 세척: 'A (Shield)' -> 'A'
