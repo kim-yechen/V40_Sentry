@@ -466,10 +466,10 @@ class QuantumControlCenter:
                     self.sections["🚀 [TEN-B]"].append(label)
                     f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": en_val})
 
-            # [섹션 4] 💎 [MINING-P] 원자재 눌림목 (3개) - 수선 완료
+             # [실행] 4구역: 💎 [MINING-P]
             self.sections["💎 [MINING-P]"] = []
             if mining_df is not None and not mining_df.empty:
-                # 에너지 > 50 & Grade A/B 필터링
+                # Grade에 A 또는 B가 포함된 놈들만 필터링
                 mining_pullback = mining_df[
                     (mining_df['V_Energy'] > 50) & 
                     (mining_df['Grade'].str.contains('A|B', na=False))
@@ -477,6 +477,7 @@ class QuantumControlCenter:
 
                 for _, r in mining_pullback.iterrows():
                     sym, en = r.get('Symbol', 'N/A'), r.get('V_Energy', 0.0)
+                    
                     
                     # Grade 문자열에서 첫 글자만 추출 (예: 'A (Shield)' -> 'A')
                     raw_grade = str(r.get('Grade', 'D'))
