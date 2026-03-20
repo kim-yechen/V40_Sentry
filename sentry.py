@@ -447,17 +447,24 @@ class QuantumControlCenter:
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
 
-            # [섹션 3] 🚀 TEN-B BNAI (3개)
+            # [섹션 3] 🚀 TEN-B BNAI (이름+에너지 복구 완료)
             self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
+                # 에너지가 높은 상위 3개 추출
                 bnai_top = bnai_df.sort_values(by='V_Energy', ascending=False).head(3)
                 for _, r in bnai_top.iterrows():
+                    # --- [수정 포인트] 티커명 확보 ---
+                    # 파일 컬럼명에 따라 'Ticker' 또는 'Symbol' 중 있는 것을 가져옵니다.
+                    sym = r.get('Ticker', r.get('Symbol', 'TGT'))
                     en_val = r.get('V_Energy', 0.0)
-                    # 에너지 수치 가독성 처리 (Million 단위)
+                    
+                    # 에너지 수치 가독성 처리 (M 단위)
                     display_en = f"{en_val/1000000:.1f}M" if en_val > 1000000 else f"{en_val:.1f}"
-                    label = f"🚀 TEN-B | E:{display_en}"
+                    
+                    # [최종 라벨] 티커명이 포함되도록 수정
+                    label = f"🚀 {sym} | E:{display_en}"
                     self.sections["🚀 [TEN-B]"].append(label)
-                    f2_data.append({"Section": "TEN-B", "Ticker": "BNAI_TGT", "Energy": en_val})
+                    f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": en_val})
 
             # [섹션 4] 💎 [MINING-P] 원자재 눌림목 (3개) - 수선 완료
             self.sections["💎 [MINING-P]"] = []
