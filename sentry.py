@@ -400,38 +400,27 @@ class QuantumControlCenter:
 
     # --------------------------------------------------------------------------
     # [3단계] 2층 전략주 발굴 (필터링 적용 완료)
-    # --------------------------------------------------------------------------
     def process_floor_2(self):
         logging.info("공정 2: 2층 12개 전략주(NGX/NBI/TEN-B/MINING) 통합 가공...")
         try:
             # 1. 리소스 로드 (파일명 정밀 타격)
             ngx_df = self.load_resource("V40_NGX_100_COMPLETE (1).xlsx")
             nbi_df = self.load_resource("V40_NBI_260_COMPLETE (1).xlsx")
-            bnai_df = self.load_resource("V7_RESULT_BNAI_FINAL.xlsx")
+            # 텐배거 파일은 형님이 주신 0837 파일을 정확히 지칭 (환경에 맞게 파일명 확인 필요)
+            bnai_df = self.load_resource("V40_TEN_BAGGER_REPORT_0837.xlsx")
             mining_df = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx")
 
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️보수" if is_collapse else "🚀공격"
             f2_data = []
 
-            # [내부 함수] 스나이퍼 엔진 (수익성 가중치 1.2배 적용)
+            # [함수] 스나이퍼 엔진 (NGX/NBI용)
             def optimized_sniper(df, section_name):
                 if df is None or df.empty: return []
                 temp_df = df.copy()
-                
-                # 수익성 종목 에너지 버프 (Insider Monkey 로직)
                 if 'Net_Profit' in temp_df.columns:
-                    temp_df['V40_Energy'] = temp_df.apply(
-                        lambda x: x['V40_Energy'] * 1.2 if x['Net_Profit'] > 0 else x['V40_Energy'], 
-                        axis=1
-                    )
-                
-                # 시총 $300M 이상 & 거래량 300% 이하 정밀 사격
-                target_pool = temp_df[
-                    (temp_df['MarketCap'] >= 300) & 
-                    (temp_df['Vol_Ratio_%'] <= 300)
-                ].sort_values(by='V40_Energy', ascending=False)
-                
+                    temp_df['V40_Energy'] = temp_df.apply(lambda x: x['V40_Energy'] * 1.2 if x['Net_Profit'] > 0 else x['V40_Energy'], axis=1)
+                target_pool = temp_df[(temp_df['MarketCap'] >= 300) & (temp_df['Vol_Ratio_%'] <= 300)].sort_values(by='V40_Energy', ascending=False)
                 res_labels = []
                 for _, r in target_pool.head(3).iterrows():
                     sym, en, vol = r['Ticker'], r['V40_Energy'], r['Vol_Ratio_%']
@@ -441,60 +430,50 @@ class QuantumControlCenter:
                     f2_data.append({"Section": section_name, "Ticker": sym, "Energy": en})
                 return res_labels
 
-            # --- [공정 실행] ---
-            
-            # [섹션 1 & 2] NGX / NBI 전략주 (6개)
+            # [실행] 1 & 2구역: NGX/NBI
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
 
-            # [섹션 3] 🚀 TEN-B BNAI (형님이 주신 엑셀 Symbol/Q_Score 정밀 타격)
+            # [실행] 3구역: 🚀 TEN-B (형님이 주신 엑셀 기반 정밀 조준)
             self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
-                # Q_Score 기준 내림차순 정렬 후 상위 3개 추출
+                # [수정 포인트] V_Energy가 아니라 Q_Score로 정렬!
                 bnai_top = bnai_df.sort_values(by='Q_Score', ascending=False).head(3)
-                
                 for _, r in bnai_top.iterrows():
-                    # 엑셀에 있는 Symbol과 Q_Score를 직접 호출 (더 이상 헷갈릴 일 없음)
                     sym = str(r['Symbol'])
                     score = float(r['Q_Score'])
-                    
-                    # 에너지 가독성 (형님 스타일: 300 이상이면 소수점 1자리)
+                    # 가독성 처리
                     display_en = f"{score/1000000:.1f}M" if score > 1000000 else f"{score:.1f}"
-                    
                     label = f"🚀 {sym} | E:{display_en}"
                     self.sections["🚀 [TEN-B]"].append(label)
                     f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": score})
 
-            # [섹션 4] 💎 [MINING-P] (원자재 눌림목 - 동일 로직 적용)
+            # [실행] 4구역: 💎 [MINING-P] (원자재 눌림목)
             self.sections["💎 [MINING-P]"] = []
             if mining_df is not None and not mining_df.empty:
-                # Grade A/B & 에너지 50 이상 필터링
                 mining_pullback = mining_df[
                     (mining_df['V_Energy'] > 50) & 
                     (mining_df['Grade'].str.contains('A|B', na=False))
                 ].sort_values(by='V_Energy', ascending=False).head(3)
-
                 for _, r in mining_pullback.iterrows():
                     m_sym = str(r.get('Symbol', 'N/A'))
                     m_en = float(r.get('V_Energy', 0.0))
-                    
-                    # Grade 정밀 세척: 'A (Shield)' -> 'A'
                     raw_grade = str(r.get('Grade', 'D'))
                     clean_grade = raw_grade if raw_grade else 'D'
-                    
                     label = f"🎯 BEST {m_sym} | E:{m_en:.1f} ({clean_grade})"
                     self.sections["💎 [MINING-P]"].append(label)
                     f2_data.append({"Section": "MINING", "Ticker": m_sym, "Energy": m_en})
-                    
-            # 최종 무결성 검증 (1+1-1=Complete)
+            
             self.floor_2_df = pd.DataFrame(f2_data)
             return True
-
         except Exception as e:
-            err_msg = f"2층 통합 공정 내부 모순: {str(e)}"
+            # 원칙 3 준수: 에러 발생 시 상세 정보 보고
+            import traceback
+            err_msg = f"2층 보정 공정 모순: {str(e)}\n{traceback.format_exc()}"
             self.error_log.append(err_msg)
             logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
             return True
+            
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
