@@ -447,40 +447,36 @@ class QuantumControlCenter:
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
 
-            # [섹션 3] 🚀 TEN-B BNAI (엑셀 컬럼명 'Symbol', 'Q_Score' 정밀 타격)
+            # [섹션 3] 🚀 TEN-B BNAI (형님이 주신 엑셀 Symbol/Q_Score 정밀 타격)
             self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
-                # 1. 엑셀 구조에 맞게 정렬 (Q_Score가 높은 순서대로)
-                # 현재 파일 기준 상위 3개: BNAI, HYMC, ROLR
+                # Q_Score 기준 내림차순 정렬 후 상위 3개 추출
                 bnai_top = bnai_df.sort_values(by='Q_Score', ascending=False).head(3)
                 
                 for _, r in bnai_top.iterrows():
-                    # 2. 데이터 추출 (컬럼명 'Symbol'과 'Q_Score' 직접 지정)
+                    # 엑셀에 있는 Symbol과 Q_Score를 직접 호출 (더 이상 헷갈릴 일 없음)
                     sym = str(r['Symbol'])
-                    score_val = float(r['Q_Score'])
+                    score = float(r['Q_Score'])
                     
-                    # 3. 에너지 가독성 처리 (형님 스타일 유지)
-                    # 만약 스코어가 백만 단위가 넘어가면 M으로 표시, 아니면 소수점 1자리
-                    display_score = f"{score_val/1000000:.1f}M" if score_val > 1000000 else f"{score_val:.1f}"
+                    # 에너지 가독성 (형님 스타일: 300 이상이면 소수점 1자리)
+                    display_en = f"{score/1000000:.1f}M" if score > 1000000 else f"{score:.1f}"
                     
-                    # [최종 라벨] 이제 외계어 대신 종목명이 찍힙니다.
-                    label = f"🚀 {sym} | E:{display_score}"
+                    label = f"🚀 {sym} | E:{display_en}"
                     self.sections["🚀 [TEN-B]"].append(label)
-                    
-                    # 4. 데이터 프레임 기록 (무결성 유지)
-                    f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": score_val})
+                    f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": score})
 
-            # [섹션 4] 💎 [MINING-P] (동일하게 수정)
+            # [섹션 4] 💎 [MINING-P] (원자재 눌림목 - 동일 로직 적용)
             self.sections["💎 [MINING-P]"] = []
             if mining_df is not None and not mining_df.empty:
+                # Grade A/B & 에너지 50 이상 필터링
                 mining_pullback = mining_df[
                     (mining_df['V_Energy'] > 50) & 
                     (mining_df['Grade'].str.contains('A|B', na=False))
                 ].sort_values(by='V_Energy', ascending=False).head(3)
 
                 for _, r in mining_pullback.iterrows():
-                    m_sym = str(r.get('Symbol', r.get('Ticker', 'N/A')))
-                    m_en = r.get('V_Energy', 0.0)
+                    m_sym = str(r.get('Symbol', 'N/A'))
+                    m_en = float(r.get('V_Energy', 0.0))
                     
                     # Grade 정밀 세척: 'A (Shield)' -> 'A'
                     raw_grade = str(r.get('Grade', 'D'))
