@@ -447,46 +447,51 @@ class QuantumControlCenter:
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
 
-            # [섹션 3] 🚀 TEN-B BNAI (이름 저격 무결성 강화)
+            # [섹션 3] 🚀 TEN-B BNAI (외계어 완전 퇴출본)
             self.sections["🚀 [TEN-B]"] = []
             if bnai_df is not None and not bnai_df.empty:
+                # --- [무결성 강제 보정] ---
+                # 맨 첫 번째 컬럼의 이름을 강제로 'Ticker'라고 명명합니다. (가장 확실한 방법)
+                bnai_df.columns = ['Ticker'] + list(bnai_df.columns[1:])
+                
                 # 에너지 상위 3개 추출
                 bnai_top = bnai_df.sort_values(by='V_Energy', ascending=False).head(3)
                 
                 for _, r in bnai_top.iterrows():
-                    # --- [무결성 수선] ---
-                    # 컬럼명을 모를 때를 대비해 첫 번째 열(.iloc)의 데이터를 종목명으로 강제 지정
-                    # 보통 엑셀의 첫 번째 열이 티커입니다.
-                    sym = str(r.iloc) 
-                    
+                    # 이제 'Ticker'라는 이름이 확실히 존재하므로 안전하게 호출
+                    sym = str(r['Ticker'])
                     en_val = r.get('V_Energy', 0.0)
+                    
+                    # 에너지 가독성 (M 단위)
                     display_en = f"{en_val/1000000:.1f}M" if en_val > 1000000 else f"{en_val:.1f}"
                     
                     label = f"🚀 {sym} | E:{display_en}"
                     self.sections["🚀 [TEN-B]"].append(label)
                     f2_data.append({"Section": "TEN-B", "Ticker": sym, "Energy": en_val})
 
-            # [섹션 4] 💎 [MINING-P] (Grade 가독성 수선 포함)
+            # [섹션 4] 💎 [MINING-P] (Grade 괄호 제거 포함)
             self.sections["💎 [MINING-P]"] = []
             if mining_df is not None and not mining_df.empty:
+                # Symbol 컬럼 강제 명명 (혹시 모를 에러 방지)
+                mining_df.columns = ['Symbol'] + list(mining_df.columns[1:])
+                
                 mining_pullback = mining_df[
                     (mining_df['V_Energy'] > 50) & 
                     (mining_df['Grade'].str.contains('A|B', na=False))
                 ].sort_values(by='V_Energy', ascending=False).head(3)
 
                 for _, r in mining_pullback.iterrows():
-                    # 여기도 안전하게 첫 번째 열 혹은 'Symbol' 확인
-                    m_sym = r.get('Symbol', r.iloc)
+                    m_sym = str(r['Symbol'])
                     m_en = r.get('V_Energy', 0.0)
                     
-                    # 'A (Shield)' -> 'A'로 정밀 세척
+                    # 'A (Shield)' -> 'A'만 남기기 (첫 글자 추출)
                     raw_grade = str(r.get('Grade', 'D'))
                     clean_grade = raw_grade if raw_grade else 'D'
                     
                     label = f"🎯 BEST {m_sym} | E:{m_en:.1f} ({clean_grade})"
                     self.sections["💎 [MINING-P]"].append(label)
                     f2_data.append({"Section": "MINING", "Ticker": m_sym, "Energy": m_en})
-
+                    
             # 최종 무결성 검증 (1+1-1=Complete)
             self.floor_2_df = pd.DataFrame(f2_data)
             return True
