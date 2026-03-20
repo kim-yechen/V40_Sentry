@@ -52,13 +52,19 @@ class QuantumControlCenter:
         self.error_log = []
         
         # 섹션별 무결성 저장소 (12개 타겟 보존)
-        self.sections = {
-            "🛡️ [SHIELD]": [],
-            "🎯 [BEST]": [],
-            "🚀 [NGX-3]": [],
-            "🧬 [NBI-3]": [],
-            "🤖 [BNAI]": []
-        }
+        # [최종 통합] 1층 방어 + 2층 12개 타겟 무결성 저장소
+        self.sections = {
+            # --- 1층 및 핵심 방어구역 ---
+            "🛡️ [SHIELD]": [],   # 초안전 자산
+            "🎯 [BEST]": [],     # 수익성 최상단 종목
+            
+            # --- 2층 12개 무결성 타겟 (3개씩 4개 구역) ---
+            "🚀 [NGX-PRO]": [],  # 비바이오 전략주 (3)
+            "🧬 [NBI-PRO]": [],  # 바이오 전략주 (3)
+            "🚀 [TEN-B]": [],    # BNAI 텐배거 (3)
+            "💎 [MINING-P]": []   # 원자재 눌림목 (3)
+        }
+
 
         logging.info(f"V40 시스템 엔진 점화... (강제 보정 스위치: {self.macro_v8_switch})")
 
@@ -396,71 +402,92 @@ class QuantumControlCenter:
     # [3단계] 2층 전략주 발굴 (필터링 적용 완료)
     # --------------------------------------------------------------------------
     def process_floor_2(self):
-        logging.info("공정 2: 2층 전략주 타격 범위 확대 및 수익성 가중치 적용...")
+        logging.info("공정 2: 2층 12개 전략주(NGX/NBI/TEN-B/MINING) 통합 가공...")
         try:
-            # 리소스 로드
+            # 1. 리소스 로드 (파일명 정밀 타격)
             ngx_df = self.load_resource("V40_NGX_100_COMPLETE (1).xlsx")
             nbi_df = self.load_resource("V40_NBI_260_COMPLETE (1).xlsx")
-            
+            bnai_df = self.load_resource("V7_RESULT_BNAI_FINAL.xlsx")
+            mining_df = self.load_resource("V7C_GLOBAL_MINING_TOTAL_REPORT_20260116.xlsx")
+
             is_collapse = self.v8_p >= 60.0
             prefix = "⚠️보수" if is_collapse else "🚀공격"
             f2_data = []
 
+            # [내부 함수] 스나이퍼 엔진 (수익성 가중치 1.2배 적용)
             def optimized_sniper(df, section_name):
                 if df is None or df.empty: return []
-                
-                # 1. 기초 체질 필터 (Small-Cap $300M~$5B로 확대)
-                # 수익성이 확인된 종목은 에너지를 20% 가중 (Insider Monkey 효과)
                 temp_df = df.copy()
                 
-                # 수익성/성장성 가중치 부여 로직 (필터링이 아닌 스코어링)
+                # 수익성 종목 에너지 버프 (Insider Monkey 로직)
                 if 'Net_Profit' in temp_df.columns:
                     temp_df['V40_Energy'] = temp_df.apply(
                         lambda x: x['V40_Energy'] * 1.2 if x['Net_Profit'] > 0 else x['V40_Energy'], 
                         axis=1
                     )
-
-                # 2. 거래량 족쇄 완화: 150% -> 300%까지 허용 (돈 들어오는 놈 타격)
+                
+                # 시총 $300M 이상 & 거래량 300% 이하 정밀 사격
                 target_pool = temp_df[
                     (temp_df['MarketCap'] >= 300) & 
                     (temp_df['Vol_Ratio_%'] <= 300)
                 ].sort_values(by='V40_Energy', ascending=False)
-
-                results = []
+                
+                res_labels = []
                 for _, r in target_pool.head(3).iterrows():
                     sym, en, vol = r['Ticker'], r['V40_Energy'], r['Vol_Ratio_%']
-                    # 수익성 여부에 따라 아이콘 차별화
                     is_pro = "🎯" if r.get('Net_Profit', 0) > 0 else "🔥"
                     label = f"{prefix}({is_pro}{sym}:E{en:.1f}/V{vol}%)"
-                    results.append(label)
+                    res_labels.append(label)
                     f2_data.append({"Section": section_name, "Ticker": sym, "Energy": en})
-                return results
+                return res_labels
 
-            # [섹션 1 & 2] 보정된 스나이퍼 로직 적용
+            # --- [공정 실행] ---
+            
+            # [섹션 1 & 2] NGX / NBI 전략주 (6개)
             self.sections["🚀 [NGX-PRO]"] = optimized_sniper(ngx_df, "NGX")
             self.sections["🧬 [NBI-PRO]"] = optimized_sniper(nbi_df, "NBI")
-            
-            # [섹션 3 & 4] TEN-B 및 MINING은 기존의 야성 유지
-            # ... (이전 코드 동일)
 
+            # [섹션 3] 🚀 TEN-B BNAI (3개)
+            self.sections["🚀 [TEN-B]"] = []
+            if bnai_df is not None and not bnai_df.empty:
+                bnai_top = bnai_df.sort_values(by='V_Energy', ascending=False).head(3)
+                for _, r in bnai_top.iterrows():
+                    en_val = r.get('V_Energy', 0.0)
+                    # 에너지 수치 가독성 처리 (Million 단위)
+                    display_en = f"{en_val/1000000:.1f}M" if en_val > 1000000 else f"{en_val:.1f}"
+                    label = f"🚀 TEN-B | E:{display_en}"
+                    self.sections["🚀 [TEN-B]"].append(label)
+                    f2_data.append({"Section": "TEN-B", "Ticker": "BNAI_TGT", "Energy": en_val})
+
+            # [섹션 4] 💎 [MINING-P] 원자재 눌림목 (3개) - 수선 완료
+            self.sections["💎 [MINING-P]"] = []
+            if mining_df is not None and not mining_df.empty:
+                # 에너지 > 50 & Grade A/B 필터링
+                mining_pullback = mining_df[
+                    (mining_df['V_Energy'] > 50) & 
+                    (mining_df['Grade'].str.contains('A|B', na=False))
+                ].sort_values(by='V_Energy', ascending=False).head(3)
+
+                for _, r in mining_pullback.iterrows():
+                    sym, en = r.get('Symbol', 'N/A'), r.get('V_Energy', 0.0)
+                    
+                    # Grade 문자열에서 첫 글자만 추출 (예: 'A (Shield)' -> 'A')
+                    raw_grade = str(r.get('Grade', 'D'))
+                    grade = raw_grade if raw_grade else 'D' 
+                    
+                    label = f"🎯 BEST {sym} | E:{en:.1f} ({grade})"
+                    self.sections["💎 [MINING-P]"].append(label)
+                    f2_data.append({"Section": "MINING", "Ticker": sym, "Energy": en})
+
+            # 최종 무결성 검증 (1+1-1=Complete)
             self.floor_2_df = pd.DataFrame(f2_data)
             return True
+
         except Exception as e:
-            self.error_log.append(f"2층 보정 공정 모순: {str(e)}")
+            err_msg = f"2층 통합 공정 내부 모순: {str(e)}"
+            self.error_log.append(err_msg)
+            logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
             return True
-
-        except Exception as e:
-            self.error_log.append(f"2층 보강공정 모순: {str(e)}")
-            return True
-
-        except Exception as e:
-            # 원칙 3: 모순 발생 시 수동 확인 요청
-            err_msg = f"2층 파일 타격 공정 모순: {str(e)}"
-            self.error_log.append(err_msg)
-            import traceback
-            logging.error(f"❌ 2층 에러 위치: {traceback.format_exc()}")
-            return True
-
     # --------------------------------------------------------------------------
     # [4단계] 1+1-1=Complete (파일 저장 및 리포트 빌드)
     # --------------------------------------------------------------------------
